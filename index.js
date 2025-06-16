@@ -9,8 +9,15 @@ function bindEvents() {
     const searchInput = document.getElementById('searchInput');
 
     if (searchButton) {
-        searchButton.onclick = async function () { 
+        searchButton.onclick = async function () {
             console.log('搜索按钮被点击');
+
+            // 防止重复点击 - 如果按钮已经被禁用，直接返回
+            if (searchButton.disabled) {
+                console.log('搜索正在进行中，忽略重复点击');
+                return;
+            }
+
             const searchText = searchInput.value.trim();
 
             if (!searchText) {
@@ -18,11 +25,9 @@ function bindEvents() {
                 return;
             }
 
-            // 立即禁用搜索按钮
+            // 立即禁用搜索按钮和显示搜索动画
             searchButton.disabled = true;
             searchButton.style.cursor = 'not-allowed';
-
-            // 显示搜索中动画
             showSearchingAnimation();
 
             const searchType = document.querySelector('input[name="searchType"]:checked').value;
@@ -90,6 +95,12 @@ function bindEvents() {
 
 // 显示搜索中动画
 function showSearchingAnimation() {
+    // 如果已经存在搜索对话框，先移除
+    const existingDialog = document.getElementById('searchingDialog');
+    if (existingDialog) {
+        document.body.removeChild(existingDialog);
+    }
+
     const dialog = document.createElement('div');
     dialog.className = 'searching-dialog';
     dialog.id = 'searchingDialog';
@@ -102,7 +113,7 @@ function showSearchingAnimation() {
             <div class="search-status-content" id="searchStatusContent">准备开始搜索...</div>
         </div>
     `;
-    
+
     document.body.appendChild(dialog);
 }
 

@@ -158,37 +158,44 @@ window.customApis = {
         extList = customExts.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
       }
 
-      // 统计文件总数
+      // 异步统计文件总数
       let totalFiles = 0;
-      function countFiles(dir) {
-        try {
-          function traverse(currentDir) {
-            const files = fs.readdirSync(currentDir);
-            files.forEach(file => {
-              const filePath = path.join(currentDir, file);
-              const stat = fs.statSync(filePath);
-              if (stat.isDirectory()) {
-                traverse(filePath);
-              } else {
-                if (searchType === 'all') {
-                  if (isTextFile(filePath)) totalFiles++;
-                } else if (searchType === 'custom') {
-                  if (extList.includes(path.extname(file).toLowerCase())) totalFiles++;
-                }
+      function countFilesAsync(dir) {
+        return new Promise((countResolve) => {
+          onProgress(0, 0, 0, { type: 'scanning', message: '正在扫描文件...' });
+
+          // 使用 setTimeout 让UI有机会更新
+          setTimeout(() => {
+            try {
+              function traverse(currentDir) {
+                const files = fs.readdirSync(currentDir);
+                files.forEach(file => {
+                  const filePath = path.join(currentDir, file);
+                  const stat = fs.statSync(filePath);
+                  if (stat.isDirectory()) {
+                    traverse(filePath);
+                  } else {
+                    if (searchType === 'all') {
+                      if (window.customApis.isTextFile(filePath)) totalFiles++;
+                    } else if (searchType === 'custom') {
+                      if (extList.includes(path.extname(file).toLowerCase())) totalFiles++;
+                    }
+                  }
+                });
               }
-            });
-          }
-          traverse(dir);
-        } catch (error) {
-          console.error('统计文件时发生错误:', error);
-        }
+              traverse(dir);
+              onProgress(0, totalFiles, 0, { type: 'scanning', message: `扫描完成，共找到 ${totalFiles} 个文件，开始搜索...` });
+              countResolve();
+            } catch (error) {
+              console.error('统计文件时发生错误:', error);
+              countResolve();
+            }
+          }, 100); // 减少延迟到100ms，让UI能够立即响应
+        });
       }
 
-      onProgress(0, 0, 0, { type: 'scanning', message: '正在扫描文件...' });
-      countFiles(config.searchPath);
-      onProgress(0, totalFiles, 0, { type: 'scanning', message: `扫描完成，共找到 ${totalFiles} 个文件，开始搜索...` });
-
-      setTimeout(() => {
+      // 先异步扫描文件，然后开始搜索
+      countFilesAsync(config.searchPath).then(() => {
         let processedFiles = 0;
         function searchFiles(dir) {
           try {
@@ -203,7 +210,7 @@ window.customApis = {
                   let match = false;
                   let fileType = path.extname(file);
                   if (searchType === 'all') {
-                    match = isTextFile(filePath);
+                    match = window.customApis.isTextFile(filePath);
                   } else if (searchType === 'custom') {
                     match = extList.includes(fileType.toLowerCase());
                   }
@@ -223,9 +230,9 @@ window.customApis = {
                         });
                       });
                     }
-                    // 进度更新
+                    // 进度更新 - 减少更新频率到500ms
                     const currentTime = Date.now();
-                    if (currentTime - lastUpdateTime >= 1000) {
+                    if (currentTime - lastUpdateTime >= 500) {
                       const percentage = Math.round((processedFiles / totalFiles) * 100);
                       onProgress(processedFiles, totalFiles, matchedFiles, {
                         type: 'searching',
@@ -282,7 +289,7 @@ window.customApis = {
             savedPath: null
           });
         }
-      }, 1000);
+      });
     });
   },
 
@@ -366,59 +373,4 @@ function resetProgress() {
   searchStatusContent.textContent = '等待开始搜索...';
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    // ... 其他初始化代码 ...
-
-    const searchButton = document.getElementById('searchButton');
-    const searchInput = document.getElementById('searchInput');
-
-    searchButton.onclick = function () {
-        showSearchingAnimation();
-        // 让浏览器先渲染 loading
-        setTimeout(async () => {
-            // 2. 校验输入
-            const searchText = searchInput.value.trim();
-            if (!searchText) {
-                hideSearchingAnimation();
-                alert('请输入要搜索的文本内容');
-                return;
-            }
-
-            // 3. 获取搜索类型和自定义后缀
-            const searchType = document.querySelector('input[name="searchType"]:checked').value;
-            const customExts = document.getElementById('customExtInput').value;
-
-            // 4. 禁用按钮，防止重复点击
-            searchButton.disabled = true;
-            searchButton.style.cursor = 'not-allowed';
-
-            try {
-                // 5. 执行搜索
-                const result = await window.customApis.performSearch(
-                    searchText,
-                    searchType,
-                    customExts,
-                    (processed, total, matchedFiles, status) => {
-                        updateProgress(processed, total, matchedFiles, status);
-                    }
-                );
-
-                if (result.success) {
-                    // 搜索成功
-                    showCompletionDialog(result);
-                } else {
-                    alert('搜索失败: ' + result.message);
-                }
-            } catch (error) {
-                alert('搜索出错: ' + error.message);
-            } finally {
-                // 6. 启用按钮，关闭 loading
-                searchButton.disabled = false;
-                searchButton.style.cursor = 'pointer';
-                hideSearchingAnimation();
-            }
-        }, 0);
-    };
-
-    // ... 其他事件绑定 ...
-});
+// 移除重复的事件绑定代码，统一在 index.js 中处理
