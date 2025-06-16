@@ -36,6 +36,15 @@ function saveConfig(config) {
   }
 }
 
+const binaryExts = [
+  '.class', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', // 图片
+  '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', // 视频
+  '.mp3', '.wav', '.aac', '.ogg', '.flac', // 音频
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', // 压缩包
+  '.exe', '.dll', '.so', '.bin', '.dat', '.apk', '.iso', // 可执行/镜像
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx' // 办公文档（可选）
+];
+
 window.customApis = {
   // 文件系统操作
   readFile: (filename) => {
@@ -110,12 +119,12 @@ window.customApis = {
       return "未找到匹配的结果。";
     }
 
-    let markdown = "| 项目名 | 文件名 | 行号 | 内容 |\n";
-    markdown += "| ------ | ------ | ---- | ---- |\n";
+    let markdown = "| 项目名 | 文件名 | 文件类型 | 行号 | 内容 |\n";
+    markdown += "| ------ | ------ | -------- | ---- | ---- |\n";
 
     results.forEach(result => {
       const content = result.content.replace(/\|/g, '\\|');
-      markdown += `| ${result.project} | ${result.filename} | ${result.lineNumber} | ${content} |\n`;
+      markdown += `| ${result.project} | ${result.filename} | ${result.fileType} | ${result.lineNumber} | ${content} |\n`;
     });
 
     return markdown;
@@ -135,57 +144,52 @@ window.customApis = {
     }
   },
 
-  performSearch: (searchText, onProgress) => {
+  performSearch: (searchText, searchType, customExts, onProgress) => {
     return new Promise((resolve) => {
       const config = getConfig();
       const results = [];
       let matchedFiles = 0;
       let lastUpdateTime = Date.now();
-      let savedPath = null;  // 添加变量存储保存的文件路径
+      let savedPath = null;
 
-      // 首先统计Java文件总数
+      // 解析自定义后缀
+      let extList = [];
+      if (searchType === 'custom' && customExts) {
+        extList = customExts.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
+      }
+
+      // 统计文件总数
       let totalFiles = 0;
-      function countJavaFiles(dir) {
+      function countFiles(dir) {
         try {
           function traverse(currentDir) {
             const files = fs.readdirSync(currentDir);
             files.forEach(file => {
               const filePath = path.join(currentDir, file);
               const stat = fs.statSync(filePath);
-
               if (stat.isDirectory()) {
                 traverse(filePath);
-              } else if (file.endsWith('.java')) {
-                totalFiles++;
+              } else {
+                if (searchType === 'all') {
+                  if (isTextFile(filePath)) totalFiles++;
+                } else if (searchType === 'custom') {
+                  if (extList.includes(path.extname(file).toLowerCase())) totalFiles++;
+                }
               }
             });
           }
-
           traverse(dir);
         } catch (error) {
           console.error('统计文件时发生错误:', error);
         }
       }
 
-      // 显示正在统计文件的提示
-      onProgress(0, 0, 0, {
-        type: 'scanning',
-        message: '正在扫描文件...'
-      });
+      onProgress(0, 0, 0, { type: 'scanning', message: '正在扫描文件...' });
+      countFiles(config.searchPath);
+      onProgress(0, totalFiles, 0, { type: 'scanning', message: `扫描完成，共找到 ${totalFiles} 个文件，开始搜索...` });
 
-      // 统计文件总数
-      countJavaFiles(config.searchPath);
-
-      // 显示找到的文件总数
-      onProgress(0, totalFiles, 0, {
-        type: 'scanning',
-        message: `扫描完成，共找到 ${totalFiles} 个Java文件，开始搜索...`
-      });
-
-      // 等待1秒后开始搜索
       setTimeout(() => {
         let processedFiles = 0;
-
         function searchFiles(dir) {
           try {
             function traverse(currentDir) {
@@ -193,39 +197,46 @@ window.customApis = {
               files.forEach(file => {
                 const filePath = path.join(currentDir, file);
                 const stat = fs.statSync(filePath);
-
                 if (stat.isDirectory()) {
                   traverse(filePath);
-                } else if (file.endsWith('.java')) {
-                  processedFiles++;
-                  const fileResults = window.customApis.searchInFile(filePath, searchText);
-                  if (fileResults.length > 0) {
-                    matchedFiles++;
-                    const projectName = window.customApis.extractProjectName(filePath);
-                    fileResults.forEach(match => {
-                      results.push({
-                        project: projectName,
-                        filename: file,
-                        lineNumber: match.lineNumber,
-                        content: match.content
-                      });
-                    });
+                } else {
+                  let match = false;
+                  let fileType = path.extname(file);
+                  if (searchType === 'all') {
+                    match = isTextFile(filePath);
+                  } else if (searchType === 'custom') {
+                    match = extList.includes(fileType.toLowerCase());
                   }
-
-                  // 每秒更新一次进度
-                  const currentTime = Date.now();
-                  if (currentTime - lastUpdateTime >= 1000) {
-                    const percentage = Math.round((processedFiles / totalFiles) * 100);
-                    onProgress(processedFiles, totalFiles, matchedFiles, {
-                      type: 'searching',
-                      message: `正在搜索... ${percentage}% (${processedFiles}/${totalFiles} 个文件) - 已找到 ${matchedFiles} 个匹配文件`
-                    });
-                    lastUpdateTime = currentTime;
+                  if (match) {
+                    processedFiles++;
+                    const fileResults = window.customApis.searchInFile(filePath, searchText);
+                    if (fileResults.length > 0) {
+                      matchedFiles++;
+                      const projectName = window.customApis.extractProjectName(filePath);
+                      fileResults.forEach(match => {
+                        results.push({
+                          project: projectName,
+                          filename: file,
+                          fileType: fileType,
+                          lineNumber: match.lineNumber,
+                          content: match.content
+                        });
+                      });
+                    }
+                    // 进度更新
+                    const currentTime = Date.now();
+                    if (currentTime - lastUpdateTime >= 1000) {
+                      const percentage = Math.round((processedFiles / totalFiles) * 100);
+                      onProgress(processedFiles, totalFiles, matchedFiles, {
+                        type: 'searching',
+                        message: `正在搜索... ${percentage}% (${processedFiles}/${totalFiles} 个文件) - 已找到 ${matchedFiles} 个匹配文件`
+                      });
+                      lastUpdateTime = currentTime;
+                    }
                   }
                 }
               });
             }
-
             traverse(dir);
           } catch (error) {
             console.error('搜索文件时发生错误:', error);
@@ -235,7 +246,7 @@ window.customApis = {
         try {
           searchFiles(config.searchPath);
           const markdown = window.customApis.formatResultsAsMarkdown(results);
-          savedPath = window.customApis.saveMarkdownFile(markdown, searchText);  // 保存路径
+          savedPath = window.customApis.saveMarkdownFile(markdown, searchText);
 
           onProgress(totalFiles, totalFiles, matchedFiles, {
             type: 'complete',
@@ -251,7 +262,7 @@ window.customApis = {
               matchedFiles,
               totalMatches: results.length
             },
-            savedPath: savedPath  // 确保返回保存的文件路径
+            savedPath: savedPath
           });
         } catch (error) {
           onProgress(0, totalFiles, 0, {
@@ -268,7 +279,7 @@ window.customApis = {
               matchedFiles,
               totalMatches: 0
             },
-            savedPath: null  // 错误时返回 null
+            savedPath: null
           });
         }
       }, 1000);
@@ -301,6 +312,11 @@ window.customApis = {
         properties: ['openDirectory']
     });
     return paths && paths[0] ? paths[0] : null;
+  },
+
+  isTextFile: (filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    return !binaryExts.includes(ext);
   }
 };
 

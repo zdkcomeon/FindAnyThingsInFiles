@@ -25,12 +25,19 @@ function bindEvents() {
             // 显示搜索中动画
             showSearchingAnimation();
 
+            const searchType = document.querySelector('input[name="searchType"]:checked').value;
+            const customExts = document.getElementById('customExtInput').value;
+
             try {
                 // 执行搜索
-                const result = await window.customApis.performSearch(searchText, (processed, total, matchedFiles, status) => {
-                    console.log('更新进度:', processed, total, matchedFiles);
-                    updateProgress(processed, total, matchedFiles, status);
-                });
+                const result = await window.customApis.performSearch(
+                    searchText,
+                    searchType,
+                    customExts,
+                    (processed, total, matchedFiles, status) => {
+                        updateProgress(processed, total, matchedFiles, status);
+                    }
+                );
 
                 if (result.success) {
                     console.log('搜索成功:', result.message);
@@ -195,4 +202,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         };
     }
+
+    // 搜索类型切换
+    document.querySelectorAll('input[name="searchType"]').forEach(radio => {
+        radio.onchange = function() {
+            document.getElementById('customExtInput').style.display =
+                this.value === 'custom' ? 'inline-block' : 'none';
+        };
+    });
 }); 
