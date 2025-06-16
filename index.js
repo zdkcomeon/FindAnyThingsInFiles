@@ -170,4 +170,29 @@ function updateProgress(processed, total, matchedFiles, status) {
 }
 
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', init); 
+document.addEventListener('DOMContentLoaded', function() {
+    // 1. 初始化事件绑定
+    init();
+
+    // 2. 自动加载上次保存的目录
+    const config = window.customApis.getConfig();
+    if (config && config.searchPath) {
+        document.getElementById('searchPath').textContent = config.searchPath;
+    }
+
+    // 3. 绑定更新目录按钮
+    const updateBtn = document.getElementById('updatePathBtn');
+    if (updateBtn) {
+        updateBtn.onclick = async function() {
+            const newPath = window.customApis.selectDirectory();
+            if (newPath) {
+                // 更新配置
+                const config = window.customApis.getConfig();
+                config.searchPath = newPath;
+                window.customApis.saveConfig(config);
+                // 更新页面显示
+                document.getElementById('searchPath').textContent = newPath;
+            }
+        };
+    }
+}); 

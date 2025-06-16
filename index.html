@@ -18,6 +18,12 @@
                 <button class="update-path-btn" id="updatePathBtn">更新目录</button>
             </div>
             
+            <div class="search-type-group">
+                <label><input type="radio" name="searchType" value="all" checked> 全量文件</label>
+                <label><input type="radio" name="searchType" value="custom"> 自定义后缀</label>
+                <input type="text" id="customExtInput" placeholder="如 .js,.py,.txt" style="display:none; width:180px; margin-left:10px;">
+            </div>
+            
             <div class="search-status" id="searchStatus">
                 <div class="search-status-title">搜索状态</div>
                 <div class="search-status-content" id="searchStatusContent">等待开始搜索...</div>
