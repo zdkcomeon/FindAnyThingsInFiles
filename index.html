@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>find_and</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="container">
+        <div class="search-box">
+            <div class="search-title">Java文件搜索</div>
+            <div class="search-input-group">
+                <input type="text" class="search-input" id="searchInput" placeholder="请输入要搜索的文本内容...">
+                <button class="search-button" id="searchButton">搜索</button>
+            </div>
+            <div class="search-path">
+                搜索路径: <span id="searchPath">C:\Users\xxx\IdeaProjects\sj</span>
+                <button class="update-path-btn" id="updatePathBtn">更新目录</button>
+            </div>
+            
+            <div class="search-status" id="searchStatus">
+                <div class="search-status-title">搜索状态</div>
+                <div class="search-status-content" id="searchStatusContent">等待开始搜索...</div>
+            </div>
+            
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" id="progressBarFill"></div>
+                </div>
+                <div class="progress-text">
+                    <span id="progressText">0%</span>
+                    <span id="progressFiles">0/0 文件</span>
+                </div>
+                <div class="progress-stats" id="progressStats">
+                    已找到 0 个匹配文件
+                </div>
+            </div>
+        </div>
+        
+        <div class="tips">
+            <div class="tips-title">使用说明</div>
+            <div class="tips-content">
+                <p>1. 在输入框中输入要搜索的文本内容</p>
+                <p>2. 点击搜索按钮开始搜索</p>
+                <p>3. 插件会自动搜索指定目录下的所有Java文件</p>
+                <p>4. 搜索结果将以Markdown格式保存到下载目录</p>
+                <p>5. 同时会在列表中显示搜索结果</p>
+            </div>
+        </div>
+    </div>
+    <script src="index.js"></script>
+</body>
+</html> 

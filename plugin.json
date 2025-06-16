@@ -1,0 +1,19 @@
+{
+  "pluginName": "find_and",
+  "description": "搜索Java文件并输出Markdown格式结果",
+  "version": "0.0.1",
+  "author": "dongkun.zang",
+  "homepage": "https://github.com/dongkun.zang/find_and",
+  "main": "index.html",
+  "preload": "preload.js",
+  "logo": "logo.png",
+  "platform": ["win32", "darwin", "linux"],
+  "features": [
+    {
+      "code": "find_and",
+      "explain": "搜索Java文件并输出Markdown格式结果",
+      "cmds": ["find_and", "搜索Java", "java搜索"],
+      "type": "over"
+    }
+  ]
+} 

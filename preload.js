@@ -1,0 +1,351 @@
+// 在文件最开始添加调试信息
+console.log('preload.js 开始执行');
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const { execSync } = require("node:child_process");
+
+// 默认配置
+const DEFAULT_CONFIG = {
+  searchPath: 'C:\\Users\\dongkun.zang\\IdeaProjects\\sj'
+};
+
+// 配置存储的key
+const CONFIG_KEY = 'find_and_config';
+
+// 获取配置
+function getConfig() {
+  console.log('获取配置');
+  try {
+    const config = utools.dbStorage.getItem(CONFIG_KEY);
+    if (config) {
+      return config;
+    }
+  } catch (error) {
+    console.error('读取配置失败:', error);
+  }
+  return DEFAULT_CONFIG;
+}
+
+// 保存配置
+function saveConfig(config) {
+  try {
+    utools.dbStorage.setItem(CONFIG_KEY, config);
+  } catch (error) {
+    console.error('保存配置失败:', error);
+  }
+}
+
+window.customApis = {
+  // 文件系统操作
+  readFile: (filename) => {
+    return fs.readFileSync(filename, { encoding: "utf-8" });
+  },
+  getFolder: (filepath) => {
+    return path.dirname(filepath);
+  },
+  getOSInfo: () => {
+    return { arch: os.arch(), cpus: os.cpus(), release: os.release() };
+  },
+  execCommand: (command) => {
+    execSync(command);
+  },
+  readdir: (dir) => {
+    return fs.readdirSync(dir);
+  },
+  stat: (filepath) => {
+    return fs.statSync(filepath);
+  },
+  writeFile: (filepath, content) => {
+    return fs.writeFileSync(filepath, content, { encoding: "utf-8" });
+  },
+  pathJoin: (...paths) => {
+    return path.join(...paths);
+  },
+
+  // 搜索相关方法
+  searchInFile: (filePath, searchText) => {
+    try {
+      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
+      const lines = content.split('\n');
+      const results = [];
+
+      lines.forEach((line, index) => {
+        if (line.includes(searchText)) {
+          results.push({
+            lineNumber: index + 1,
+            content: line.trim()
+          });
+        }
+      });
+
+      return results;
+    } catch (error) {
+      console.error(`处理文件时发生错误 ${filePath}: ${error.message}`);
+      return [];
+    }
+  },
+
+  extractProjectName: (filePath) => {
+    try {
+      const config = getConfig();
+      // 1. 获取配置的根目录
+      let root = config.searchPath.replace(/\//g, '\\');
+      // 2. 转义正则特殊字符
+      root = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // 3. 构造正则
+      const reg = new RegExp(root + '\\\\(.*?)\\\\');
+      // 4. 匹配
+      const pathStr = filePath.replace(/\//g, '\\');
+      const match = pathStr.match(reg) || [];
+      return match[1] || "unknown";
+    } catch (error) {
+      console.error(`提取项目名时发生错误: ${error.message}`);
+      return "unknown";
+    }
+  },
+
+  formatResultsAsMarkdown: (results) => {
+    if (!results || results.length === 0) {
+      return "未找到匹配的结果。";
+    }
+
+    let markdown = "| 项目名 | 文件名 | 行号 | 内容 |\n";
+    markdown += "| ------ | ------ | ---- | ---- |\n";
+
+    results.forEach(result => {
+      const content = result.content.replace(/\|/g, '\\|');
+      markdown += `| ${result.project} | ${result.filename} | ${result.lineNumber} | ${content} |\n`;
+    });
+
+    return markdown;
+  },
+
+  saveMarkdownFile: (content, searchText) => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `search_results_${searchText}_${timestamp}.md`;
+    const filePath = path.join(utools.getPath('downloads'), fileName);
+
+    try {
+      fs.writeFileSync(filePath, content, { encoding: "utf-8" });
+      return filePath;
+    } catch (error) {
+      console.error('保存文件时发生错误:', error);
+      throw error;
+    }
+  },
+
+  performSearch: (searchText, onProgress) => {
+    return new Promise((resolve) => {
+      const config = getConfig();
+      const results = [];
+      let matchedFiles = 0;
+      let lastUpdateTime = Date.now();
+      let savedPath = null;  // 添加变量存储保存的文件路径
+
+      // 首先统计Java文件总数
+      let totalFiles = 0;
+      function countJavaFiles(dir) {
+        try {
+          function traverse(currentDir) {
+            const files = fs.readdirSync(currentDir);
+            files.forEach(file => {
+              const filePath = path.join(currentDir, file);
+              const stat = fs.statSync(filePath);
+
+              if (stat.isDirectory()) {
+                traverse(filePath);
+              } else if (file.endsWith('.java')) {
+                totalFiles++;
+              }
+            });
+          }
+
+          traverse(dir);
+        } catch (error) {
+          console.error('统计文件时发生错误:', error);
+        }
+      }
+
+      // 显示正在统计文件的提示
+      onProgress(0, 0, 0, {
+        type: 'scanning',
+        message: '正在扫描文件...'
+      });
+
+      // 统计文件总数
+      countJavaFiles(config.searchPath);
+
+      // 显示找到的文件总数
+      onProgress(0, totalFiles, 0, {
+        type: 'scanning',
+        message: `扫描完成，共找到 ${totalFiles} 个Java文件，开始搜索...`
+      });
+
+      // 等待1秒后开始搜索
+      setTimeout(() => {
+        let processedFiles = 0;
+
+        function searchFiles(dir) {
+          try {
+            function traverse(currentDir) {
+              const files = fs.readdirSync(currentDir);
+              files.forEach(file => {
+                const filePath = path.join(currentDir, file);
+                const stat = fs.statSync(filePath);
+
+                if (stat.isDirectory()) {
+                  traverse(filePath);
+                } else if (file.endsWith('.java')) {
+                  processedFiles++;
+                  const fileResults = window.customApis.searchInFile(filePath, searchText);
+                  if (fileResults.length > 0) {
+                    matchedFiles++;
+                    const projectName = window.customApis.extractProjectName(filePath);
+                    fileResults.forEach(match => {
+                      results.push({
+                        project: projectName,
+                        filename: file,
+                        lineNumber: match.lineNumber,
+                        content: match.content
+                      });
+                    });
+                  }
+
+                  // 每秒更新一次进度
+                  const currentTime = Date.now();
+                  if (currentTime - lastUpdateTime >= 1000) {
+                    const percentage = Math.round((processedFiles / totalFiles) * 100);
+                    onProgress(processedFiles, totalFiles, matchedFiles, {
+                      type: 'searching',
+                      message: `正在搜索... ${percentage}% (${processedFiles}/${totalFiles} 个文件) - 已找到 ${matchedFiles} 个匹配文件`
+                    });
+                    lastUpdateTime = currentTime;
+                  }
+                }
+              });
+            }
+
+            traverse(dir);
+          } catch (error) {
+            console.error('搜索文件时发生错误:', error);
+          }
+        }
+
+        try {
+          searchFiles(config.searchPath);
+          const markdown = window.customApis.formatResultsAsMarkdown(results);
+          savedPath = window.customApis.saveMarkdownFile(markdown, searchText);  // 保存路径
+
+          onProgress(totalFiles, totalFiles, matchedFiles, {
+            type: 'complete',
+            message: `搜索完成！共搜索 ${totalFiles} 个文件，找到 ${matchedFiles} 个匹配文件，${results.length} 个匹配行。结果已保存到: ${savedPath}`
+          });
+
+          resolve({
+            success: true,
+            message: `搜索完成！共搜索 ${totalFiles} 个文件，找到 ${matchedFiles} 个匹配文件，${results.length} 个匹配行。结果已保存到: ${savedPath}`,
+            results: results,
+            stats: {
+              totalFiles,
+              matchedFiles,
+              totalMatches: results.length
+            },
+            savedPath: savedPath  // 确保返回保存的文件路径
+          });
+        } catch (error) {
+          onProgress(0, totalFiles, 0, {
+            type: 'error',
+            message: `搜索出错: ${error.message}`
+          });
+
+          resolve({
+            success: false,
+            message: `搜索出错: ${error.message}`,
+            results: [],
+            stats: {
+              totalFiles,
+              matchedFiles,
+              totalMatches: 0
+            },
+            savedPath: null  // 错误时返回 null
+          });
+        }
+      }, 1000);
+    });
+  },
+
+  // 配置相关方法
+  getConfig: () => getConfig(),
+  saveConfig: (config) => saveConfig(config),
+
+  // 打开文件位置
+  openFileLocation: (filePath) => {
+    try {
+      if (process.platform === 'win32') {
+        execSync(`explorer /select,"${filePath}"`);
+      } else if (process.platform === 'darwin') {
+        execSync(`open -R "${filePath}"`);
+      } else {
+        execSync(`xdg-open "${path.dirname(filePath)}"`);
+      }
+    } catch (error) {
+      console.error('打开文件位置失败:', error);
+      throw error;
+    }
+  },
+
+  selectDirectory: () => {
+    // utools.showOpenDialog 返回数组，取第一个
+    const paths = utools.showOpenDialog({
+        properties: ['openDirectory']
+    });
+    return paths && paths[0] ? paths[0] : null;
+  }
+};
+
+// 更新进度显示
+function updateProgress(processed, total, matchedFiles, status) {
+  const percentage = Math.round((processed / total) * 100);
+
+  // 更新状态显示
+  const searchStatus = document.getElementById('searchStatus');
+  const searchStatusContent = document.getElementById('searchStatusContent');
+
+  if (status) {
+    searchStatus.className = 'search-status ' + status.type;
+    searchStatusContent.textContent = status.message;
+  }
+
+  // 更新进度条
+  const progressContainer = document.getElementById('progressContainer');
+  const progressBarFill = document.getElementById('progressBarFill');
+  const progressText = document.getElementById('progressText');
+  const progressFiles = document.getElementById('progressFiles');
+  const progressStats = document.getElementById('progressStats');
+
+  progressContainer.classList.add('active');
+  progressBarFill.style.width = `${percentage}%`;
+  progressText.textContent = `${percentage}%`;
+  progressFiles.textContent = `${processed}/${total} 文件`;
+  progressStats.textContent = `已找到 ${matchedFiles} 个匹配文件`;
+}
+
+// 重置进度显示
+function resetProgress() {
+  const progressContainer = document.getElementById('progressContainer');
+  const progressBarFill = document.getElementById('progressBarFill');
+  const progressText = document.getElementById('progressText');
+  const progressFiles = document.getElementById('progressFiles');
+  const progressStats = document.getElementById('progressStats');
+  const searchStatus = document.getElementById('searchStatus');
+  const searchStatusContent = document.getElementById('searchStatusContent');
+
+  progressContainer.classList.remove('active');
+  progressBarFill.style.width = '0%';
+  progressText.textContent = '0%';
+  progressFiles.textContent = '0/0 文件';
+  progressStats.textContent = '已找到 0 个匹配文件';
+  searchStatus.className = 'search-status';
+  searchStatusContent.textContent = '等待开始搜索...';
+}
