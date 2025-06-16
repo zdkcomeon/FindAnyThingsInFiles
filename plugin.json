@@ -1,9 +1,8 @@
 {
   "pluginName": "find_and",
-  "description": "搜索Java文件并输出Markdown格式结果",
-  "version": "0.0.1",
-  "author": "dongkun.zang",
-  "homepage": "https://github.com/dongkun.zang/find_and",
+  "description": "搜索指定文件并输出Markdown格式结果",
+  "version": "1.0.0",
+  "author": "dongkun",
   "main": "index.html",
   "preload": "preload.js",
   "logo": "logo.png",

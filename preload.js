@@ -7,7 +7,7 @@ const { execSync } = require("node:child_process");
 
 // 默认配置
 const DEFAULT_CONFIG = {
-  searchPath: 'C:\\Users\\dongkun.zang\\IdeaProjects\\sj'
+  searchPath: 'C:\\Users'
 };
 
 // 配置存储的key
