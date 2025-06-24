@@ -155,7 +155,14 @@ window.customApis = {
       // 解析自定义后缀
       let extList = [];
       if (searchType === 'custom' && customExts) {
-        extList = customExts.split(',').map(e => e.trim().toLowerCase()).filter(e => e);
+        extList = customExts.split(',').map(e => {
+          e = e.trim().toLowerCase();
+          // 确保后缀以点开头
+          if (e && !e.startsWith('.')) {
+            e = '.' + e;
+          }
+          return e;
+        }).filter(e => e && e.length > 1);
       }
 
       // 异步统计文件总数

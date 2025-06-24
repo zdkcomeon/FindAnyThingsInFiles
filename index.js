@@ -31,7 +31,7 @@ function bindEvents() {
             showSearchingAnimation();
 
             const searchType = document.querySelector('input[name="searchType"]:checked').value;
-            const customExts = document.getElementById('customExtInput').value;
+            const customExts = getSelectedExtensions();
 
             try {
                 // 执行搜索
@@ -187,6 +187,109 @@ function updateProgress(processed, total, matchedFiles, status) {
     }
 }
 
+// 文件后缀管理
+let selectedExtensions = new Set();
+
+// 获取选中的文件后缀
+function getSelectedExtensions() {
+    const customInput = document.getElementById('customExtInput').value.trim();
+    const allExts = new Set([...selectedExtensions]);
+
+    // 添加自定义输入的后缀
+    if (customInput) {
+        const customExts = customInput.split(',').map(ext => ext.trim()).filter(ext => ext);
+        customExts.forEach(ext => {
+            if (!ext.startsWith('.')) {
+                ext = '.' + ext;
+            }
+            allExts.add(ext);
+        });
+    }
+
+    return Array.from(allExts).join(',');
+}
+
+// 更新选中后缀的显示
+function updateSelectedExtensionsDisplay() {
+    const container = document.getElementById('selectedExtTags');
+    const customInput = document.getElementById('customExtInput').value.trim();
+
+    // 收集所有后缀
+    const allExts = new Set([...selectedExtensions]);
+    if (customInput) {
+        const customExts = customInput.split(',').map(ext => ext.trim()).filter(ext => ext);
+        customExts.forEach(ext => {
+            if (!ext.startsWith('.')) {
+                ext = '.' + ext;
+            }
+            allExts.add(ext);
+        });
+    }
+
+    if (allExts.size === 0) {
+        container.innerHTML = '<span class="no-selection">未选择任何文件类型</span>';
+        return;
+    }
+
+    container.innerHTML = '';
+    allExts.forEach(ext => {
+        const tag = document.createElement('span');
+        tag.className = 'ext-tag';
+        tag.innerHTML = `${ext} <span class="remove" data-ext="${ext}">×</span>`;
+        container.appendChild(tag);
+    });
+}
+
+// 切换后缀选择状态
+function toggleExtension(ext) {
+    if (selectedExtensions.has(ext)) {
+        selectedExtensions.delete(ext);
+    } else {
+        selectedExtensions.add(ext);
+    }
+
+    // 更新按钮状态
+    const btn = document.querySelector(`[data-ext="${ext}"]`);
+    if (btn) {
+        btn.classList.toggle('selected', selectedExtensions.has(ext));
+    }
+
+    updateSelectedExtensionsDisplay();
+}
+
+// 移除后缀
+function removeExtension(ext) {
+    selectedExtensions.delete(ext);
+
+    // 更新按钮状态
+    const btn = document.querySelector(`[data-ext="${ext}"]`);
+    if (btn) {
+        btn.classList.remove('selected');
+    }
+
+    // 如果是自定义输入的后缀，从输入框中移除
+    const customInput = document.getElementById('customExtInput');
+    const customExts = customInput.value.split(',').map(ext => ext.trim()).filter(ext => ext);
+    const cleanExt = ext.startsWith('.') ? ext.substring(1) : ext;
+    const updatedExts = customExts.filter(e => e !== ext && e !== cleanExt);
+    customInput.value = updatedExts.join(',');
+
+    updateSelectedExtensionsDisplay();
+}
+
+// 清空所有选择
+function clearAllExtensions() {
+    selectedExtensions.clear();
+    document.getElementById('customExtInput').value = '';
+
+    // 清除所有按钮的选中状态
+    document.querySelectorAll('.ext-btn.selected').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+
+    updateSelectedExtensionsDisplay();
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
     // 1. 初始化事件绑定
@@ -217,8 +320,43 @@ document.addEventListener('DOMContentLoaded', function() {
     // 搜索类型切换
     document.querySelectorAll('input[name="searchType"]').forEach(radio => {
         radio.onchange = function() {
-            document.getElementById('customExtInput').style.display =
-                this.value === 'custom' ? 'inline-block' : 'none';
+            const customExtPanel = document.getElementById('customExtPanel');
+            customExtPanel.style.display = this.value === 'custom' ? 'block' : 'none';
         };
     });
-}); 
+
+    // 常用后缀按钮事件
+    document.querySelectorAll('.ext-btn').forEach(btn => {
+        btn.onclick = function() {
+            const ext = this.getAttribute('data-ext');
+            toggleExtension(ext);
+        };
+    });
+
+    // 自定义输入框事件
+    const customExtInput = document.getElementById('customExtInput');
+    if (customExtInput) {
+        customExtInput.oninput = function() {
+            updateSelectedExtensionsDisplay();
+        };
+    }
+
+    // 清空按钮事件
+    const clearExtBtn = document.getElementById('clearExtBtn');
+    if (clearExtBtn) {
+        clearExtBtn.onclick = function() {
+            clearAllExtensions();
+        };
+    }
+
+    // 选中标签的移除事件（事件委托）
+    const selectedExtTags = document.getElementById('selectedExtTags');
+    if (selectedExtTags) {
+        selectedExtTags.onclick = function(e) {
+            if (e.target.classList.contains('remove')) {
+                const ext = e.target.getAttribute('data-ext');
+                removeExtension(ext);
+            }
+        };
+    }
+});

@@ -351,4 +351,141 @@ body {
 }
 .update-path-btn:hover {
     background: #e8f4ff;
-} 
+}
+
+/* 自定义后缀面板样式 */
+.custom-ext-panel {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+}
+
+.common-ext-group {
+    margin-bottom: 15px;
+}
+
+.common-ext-title, .custom-ext-title, .selected-ext-title {
+    font-size: 13px;
+    color: #495057;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.common-ext-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ext-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid #dee2e6;
+    background: white;
+    color: #495057;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.ext-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.ext-btn.selected {
+    background: #0066cc;
+    color: white;
+    border-color: #0066cc;
+}
+
+.ext-btn.selected:hover {
+    background: #0052a3;
+    border-color: #0052a3;
+}
+
+.custom-ext-input-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.custom-ext-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.clear-ext-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    border: 1px solid #dc3545;
+    background: white;
+    color: #dc3545;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.clear-ext-btn:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.selected-ext-display {
+    border-top: 1px solid #dee2e6;
+    padding-top: 12px;
+}
+
+.selected-ext-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 24px;
+    align-items: center;
+}
+
+.ext-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    background: #0066cc;
+    color: white;
+    border-radius: 12px;
+    font-size: 12px;
+    gap: 4px;
+}
+
+.ext-tag .remove {
+    cursor: pointer;
+    font-weight: bold;
+    padding: 0 2px;
+    border-radius: 50%;
+    transition: background 0.2s;
+}
+
+.ext-tag .remove:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.no-selection {
+    color: #6c757d;
+    font-size: 12px;
+    font-style: italic;
+}
+
+.search-type-group {
+    margin-bottom: 15px;
+}
+
+.search-type-group label {
+    margin-right: 15px;
+    font-size: 14px;
+    cursor: pointer;
+}
