@@ -1,5 +1,4 @@
-// 在文件最开始添加调试信息
-console.log('preload.js 开始执行');
+// preload.js - 插件核心逻辑
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
@@ -15,7 +14,6 @@ const CONFIG_KEY = 'find_and_config';
 
 // 获取配置
 function getConfig() {
-  console.log('获取配置');
   try {
     const config = utools.dbStorage.getItem(CONFIG_KEY);
     if (config) {
