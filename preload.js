@@ -130,16 +130,35 @@ window.customApis = {
     return markdown;
   },
 
+  // 清理文件名中的非法字符
+  sanitizeFileName: (fileName) => {
+    // 替换文件系统不允许的字符为下划线
+    // Windows: < > : " | ? * \ /
+    // 同时处理其他可能有问题的字符
+    return fileName
+      .replace(/[<>:"|?*\\/]/g, '_')  // 替换非法字符为下划线
+      .replace(/\s+/g, '_')          // 替换空格为下划线
+      .replace(/_{2,}/g, '_')        // 多个连续下划线替换为单个
+      .replace(/^_+|_+$/g, '')       // 去除开头和结尾的下划线
+      .substring(0, 100);            // 限制文件名长度，避免过长
+  },
+
   saveMarkdownFile: (content, searchText) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const fileName = `search_results_${searchText}_${timestamp}.md`;
+    // 清理搜索文本，确保可以作为文件名使用
+    const cleanSearchText = window.customApis.sanitizeFileName(searchText) || 'search';
+    const fileName = `search_results_${cleanSearchText}_${timestamp}.md`;
     const filePath = path.join(utools.getPath('downloads'), fileName);
 
     try {
       fs.writeFileSync(filePath, content, { encoding: "utf-8" });
+      console.log('文件保存成功:', filePath);
       return filePath;
     } catch (error) {
       console.error('保存文件时发生错误:', error);
+      console.error('文件路径:', filePath);
+      console.error('原始搜索文本:', searchText);
+      console.error('清理后文件名:', fileName);
       throw error;
     }
   },
