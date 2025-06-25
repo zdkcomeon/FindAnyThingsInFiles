@@ -323,7 +323,7 @@ window.customApis = {
   getConfig: () => getConfig(),
   saveConfig: (config) => saveConfig(config),
 
-  // 打开文件位置
+  // 打开文件位置（选中文件但不打开）
   openFileLocation: (filePath) => {
     try {
       if (process.platform === 'win32') {
@@ -335,6 +335,26 @@ window.customApis = {
       }
     } catch (error) {
       console.error('打开文件位置失败:', error);
+      throw error;
+    }
+  },
+
+  // 直接打开文件（用系统默认程序）
+  openFile: (filePath) => {
+    try {
+      if (process.platform === 'win32') {
+        // Windows: 使用 start 命令打开文件
+        execSync(`start "" "${filePath}"`, { shell: true });
+      } else if (process.platform === 'darwin') {
+        // macOS: 使用 open 命令打开文件
+        execSync(`open "${filePath}"`);
+      } else {
+        // Linux: 使用 xdg-open 打开文件
+        execSync(`xdg-open "${filePath}"`);
+      }
+      console.log('文件打开成功:', filePath);
+    } catch (error) {
+      console.error('打开文件失败:', error);
       throw error;
     }
   },

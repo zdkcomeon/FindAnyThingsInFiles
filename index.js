@@ -135,6 +135,7 @@ function showCompletionDialog(result) {
             <p>${result.message}</p>
             <div class="dialog-buttons">
                 <button class="btn btn-secondary" id="btnLater">稍后查看</button>
+                <button class="btn btn-info" id="btnOpenLocation" ${!result.savedPath ? 'disabled' : ''}>打开位置</button>
                 <button class="btn btn-primary" id="btnOpen" ${!result.savedPath ? 'disabled' : ''}>打开文件</button>
             </div>
         </div>
@@ -146,8 +147,9 @@ function showCompletionDialog(result) {
     document.getElementById('btnLater').onclick = function() {
         document.body.removeChild(dialog);
     };
-    
-    document.getElementById('btnOpen').onclick = async function() {
+
+    // 打开文件位置按钮
+    document.getElementById('btnOpenLocation').onclick = async function() {
         try {
             if (result.savedPath) {
                 await window.customApis.openFileLocation(result.savedPath);
@@ -157,6 +159,22 @@ function showCompletionDialog(result) {
         } catch (error) {
             console.error('打开文件位置失败:', error);
             alert('打开文件位置失败: ' + error.message);
+        } finally {
+            document.body.removeChild(dialog);
+        }
+    };
+
+    // 直接打开文件按钮
+    document.getElementById('btnOpen').onclick = async function() {
+        try {
+            if (result.savedPath) {
+                await window.customApis.openFile(result.savedPath);
+            } else {
+                alert('无法打开文件：文件路径无效');
+            }
+        } catch (error) {
+            console.error('打开文件失败:', error);
+            alert('打开文件失败: ' + error.message);
         } finally {
             document.body.removeChild(dialog);
         }
