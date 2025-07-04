@@ -33,6 +33,21 @@ function bindEvents() {
             const searchType = document.querySelector('input[name="searchType"]:checked').value;
             const customExts = getSelectedExtensions();
 
+            // 校验自定义后缀是否在黑名单中
+            if (searchType === 'custom') {
+                const binaryExts = window.customApis.getBinaryExts();
+                const selectedExts = customExts.split(',').map(ext => ext.trim().toLowerCase()).filter(ext => ext);
+                const invalidExts = selectedExts.filter(ext => binaryExts.includes(ext));
+
+                if (invalidExts.length > 0) {
+                    alert(`以下文件类型不允许搜索，请移除：\n${invalidExts.join(', ')}`);
+                    hideSearchingAnimation();
+                    searchButton.disabled = false;
+                    searchButton.style.cursor = 'pointer';
+                    return; // 中止搜索
+                }
+            }
+
             try {
                 // 执行搜索
                 const result = await window.customApis.performSearch(

@@ -368,6 +368,10 @@ window.customApis = {
   isTextFile: (filePath) => {
     const ext = path.extname(filePath).toLowerCase();
     return !binaryExts.includes(ext);
+  },
+
+  getBinaryExts: () => {
+    return binaryExts;
   }
 };
 
