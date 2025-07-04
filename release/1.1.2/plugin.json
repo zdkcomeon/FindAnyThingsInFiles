@@ -1,0 +1,18 @@
+{
+  "pluginName": "findInFiles",
+  "description": "搜索指定类型文件并输出Markdown格式结果",
+  "version": "1.0.0",
+  "author": "dongkun",
+  "main": "index.html",
+  "preload": "preload.js",
+  "logo": "logo.png",
+  "platform": ["win32", "darwin", "linux"],
+  "features": [
+    {
+      "code": "findInFiles",
+      "explain": "搜索指定后缀文件并输出Markdown格式结果",
+      "cmds": ["搜索Java文件","搜索文件","find","文件内容匹配"],
+      "type": "over"
+    }
+  ]
+} 
