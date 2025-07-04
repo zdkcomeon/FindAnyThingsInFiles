@@ -126,12 +126,32 @@ body {
     align-items: center;
 }
 
+.search-type-group input[type="radio"] {
+    display: none;
+}
+
 .search-type-group label {
+    padding: 8px 18px;
     font-size: 14px;
     cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    transition: all var(--transition-speed) ease;
+    background-color: var(--container-bg-color);
+    color: var(--text-light-color);
+    font-weight: 500;
+}
+
+.search-type-group label:hover {
+    border-color: var(--primary-hover-color);
+    color: var(--primary-hover-color);
+}
+
+.search-type-group label:has(input[type="radio"]:checked) {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 4px rgba(74, 144, 226, 0.2);
 }
 
 .custom-ext-panel {
