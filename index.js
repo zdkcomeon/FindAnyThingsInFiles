@@ -1,8 +1,3 @@
-// 初始化函数
-function init() {
-    bindEvents();
-}
-
 // 绑定事件
 function bindEvents() {
     const searchButton = document.getElementById('searchButton');
@@ -89,20 +84,6 @@ function bindEvents() {
             if (e.key === 'Enter') {
                 console.log('按下回车键');
                 searchButton.click();
-            }
-        };
-    }
-
-    if (document.getElementById('updatePathBtn')) {
-        document.getElementById('updatePathBtn').onclick = async function() {
-            const newPath = window.customApis.selectDirectory();
-            if (newPath) {
-                // 更新配置
-                const config = window.customApis.getConfig();
-                config.searchPath = newPath;
-                window.customApis.saveConfig(config);
-                // 更新页面显示
-                document.getElementById('searchPath').textContent = newPath;
             }
         };
     }
@@ -323,10 +304,9 @@ function clearAllExtensions() {
     updateSelectedExtensionsDisplay();
 }
 
-// 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
-    // 1. 初始化事件绑定
-    init();
+    // 1. 绑定核心搜索事件
+    bindEvents();
 
     // 2. 自动加载上次保存的目录
     const config = window.customApis.getConfig();
