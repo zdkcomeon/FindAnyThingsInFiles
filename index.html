@@ -1,91 +1,124 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>find_and</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Find in Files · 文件内容搜索</title>
     <link rel="stylesheet" href="index.css">
 </head>
 <body>
-    <div class="container">
-        <div class="search-box">
-            <div class="search-title">文件搜索</div>
-            <div class="search-input-group">
-                <input type="text" class="search-input" id="searchInput" placeholder="请输入要搜索的文本内容...">
-                <button class="search-button" id="searchButton">搜索</button>
-            </div>
-            <div class="search-path">
-                搜索路径: <span id="searchPath">C:\Users\xxx\IdeaProjects\sj</span>
-                <button class="update-path-btn" id="updatePathBtn">更新目录</button>
-            </div>
-            
-            <div class="search-type-group">
-                <label><input type="radio" name="searchType" value="all" checked> 全量文件</label>
-                <label><input type="radio" name="searchType" value="custom"> 自定义后缀</label>
+    <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+        <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+        <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+        <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+        <symbol id="icon-file" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8m-8 4h5"/></symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+        <symbol id="icon-export" viewBox="0 0 24 24"><path d="M14 3h7v7m0-7L10 14M10 5H4v15h15v-6"/></symbol>
+        <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    </svg>
 
-                <div class="custom-ext-panel" id="customExtPanel" style="display:none;">
-                    <div class="common-ext-group">
-                        <div class="common-ext-title">常用文件类型：</div>
-                        <div class="common-ext-buttons">
-                            <button type="button" class="ext-btn" data-ext=".java">Java</button>
-                            <button type="button" class="ext-btn" data-ext=".js">JavaScript</button>
-                            <button type="button" class="ext-btn" data-ext=".py">Python</button>
-                            <button type="button" class="ext-btn" data-ext=".txt">文本</button>
-                            <button type="button" class="ext-btn" data-ext=".md">Markdown</button>
-                            <button type="button" class="ext-btn" data-ext=".json">JSON</button>
-                            <button type="button" class="ext-btn" data-ext=".xml">XML</button>
-                            <button type="button" class="ext-btn" data-ext=".html">HTML</button>
-                            <button type="button" class="ext-btn" data-ext=".css">CSS</button>
-                            <button type="button" class="ext-btn" data-ext=".sql">SQL</button>
-                            <button type="button" class="ext-btn" data-ext=".log">日志</button>
-                            <button type="button" class="ext-btn" data-ext=".properties">配置</button>
-                        </div>
-                    </div>
+    <main class="workspace">
+        <header class="app-header">
+            <a class="brand" href="#searchInput" aria-label="Find in Files，跳转到搜索框">
+                <span class="brand-icon"><svg class="icon"><use href="#icon-search"/></svg></span>
+                <span>Find in Files<span class="brand-divider">/</span><span class="brand-description">文件内容搜索</span></span>
+            </a>
+            <span class="local-badge"><span class="status-dot"></span>本地搜索</span>
+        </header>
 
-                    <div class="custom-ext-input-group">
-                        <div class="custom-ext-title">自定义后缀：</div>
-                        <input type="text" id="customExtInput" placeholder="如 .ts,.vue,.go" class="custom-ext-input">
-                        <button type="button" id="clearExtBtn" class="clear-ext-btn">清空</button>
-                    </div>
+        <section class="intro" aria-labelledby="pageTitle">
+            <p class="eyebrow">LESS SEARCHING, MORE FINDING</p>
+            <h1 id="pageTitle">每一处匹配，都有迹可循。</h1>
+            <p>查找代码、日志与文档中的文本，让散落的内容一目了然。</p>
+        </section>
 
-                    <div class="selected-ext-display">
-                        <div class="selected-ext-title">已选择：</div>
-                        <div class="selected-ext-tags" id="selectedExtTags">
-                            <span class="no-selection">未选择任何文件类型</span>
-                        </div>
+        <p class="notice" id="environmentNotice" role="status" hidden>请在 uTools 中打开插件，以选择目录并搜索本地文件。</p>
+
+        <form class="search-panel" id="searchForm" novalidate>
+            <fieldset id="searchControls">
+                <legend class="sr-only">搜索条件</legend>
+                <label class="field-label" for="searchInput">搜索内容<span>按原文匹配 · 区分大小写</span></label>
+                <div class="search-row">
+                    <div class="search-input-wrap">
+                        <svg class="icon search-icon" aria-hidden="true"><use href="#icon-search"/></svg>
+                        <input id="searchInput" type="text" placeholder="输入关键词、代码片段或日志内容…" autocomplete="off" spellcheck="false" aria-describedby="formError">
+                        <button class="icon-button" id="clearSearchBtn" type="button" aria-label="清空搜索内容" hidden><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button>
+                        <kbd id="focusShortcut" title="聚焦搜索框">⌘ K</kbd>
                     </div>
+                    <button class="button button-primary search-button" id="searchButton" type="submit"><span id="searchButtonLabel">开始搜索</span><svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></button>
                 </div>
-            </div>
-            
-            <div class="search-status" id="searchStatus">
-                <div class="search-status-title">搜索状态</div>
-                <div class="search-status-content" id="searchStatusContent">等待开始搜索...</div>
-            </div>
-            
-            <div class="progress-container" id="progressContainer">
-                <div class="progress-bar">
-                    <div class="progress-bar-fill" id="progressBarFill"></div>
+
+                <button class="path-picker" id="updatePathBtn" type="button" aria-describedby="pathHint">
+                    <span class="folder-icon"><svg class="icon" aria-hidden="true"><use href="#icon-folder"/></svg></span>
+                    <span class="path-copy"><span class="path-label">搜索目录</span><span class="path-value" id="searchPath">选择要搜索的文件夹</span></span>
+                    <span class="path-action" id="pathAction">选择目录</span><svg class="icon path-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+                </button>
+                <p class="sr-only" id="pathHint">包含所有子目录，自动记住上次选择的目录。</p>
+
+                <div class="filter-row">
+                    <span class="field-label">文件范围</span>
+                    <div class="segmented-control" role="radiogroup" aria-label="文件范围">
+                        <label><input type="radio" name="searchType" value="all" checked><span>全部文本文件</span></label>
+                        <label><input type="radio" name="searchType" value="custom" aria-controls="customExtPanel"><span>指定文件类型</span></label>
+                    </div>
+                    <span class="filter-hint" id="filterHint">自动排除图片、视频等二进制文件</span>
                 </div>
-                <div class="progress-text">
-                    <span id="progressText">0%</span>
-                    <span id="progressFiles">0/0 文件</span>
-                </div>
-                <div class="progress-stats" id="progressStats">
-                    已找到 0 个匹配文件
-                </div>
+
+                <section class="extension-panel" id="customExtPanel" aria-label="文件类型选择" hidden>
+                    <div class="section-caption"><span>常用类型<span class="muted"> · 可多选</span></span><button class="text-button" id="clearExtBtn" type="button">清空选择</button></div>
+                    <div class="extension-options">
+                        <button type="button" class="ext-button" data-ext=".java" aria-pressed="false">Java<span>.java</span></button>
+                        <button type="button" class="ext-button" data-ext=".js" aria-pressed="false">JavaScript<span>.js</span></button>
+                        <button type="button" class="ext-button" data-ext=".ts" aria-pressed="false">TypeScript<span>.ts</span></button>
+                        <button type="button" class="ext-button" data-ext=".py" aria-pressed="false">Python<span>.py</span></button>
+                        <button type="button" class="ext-button" data-ext=".json" aria-pressed="false">JSON<span>.json</span></button>
+                        <button type="button" class="ext-button" data-ext=".md" aria-pressed="false">Markdown<span>.md</span></button>
+                        <button type="button" class="ext-button" data-ext=".txt" aria-pressed="false">文本<span>.txt</span></button>
+                        <button type="button" class="ext-button" data-ext=".log" aria-pressed="false">日志<span>.log</span></button>
+                        <button type="button" class="ext-button" data-ext=".html" aria-pressed="false">HTML<span>.html</span></button>
+                        <button type="button" class="ext-button" data-ext=".css" aria-pressed="false">CSS<span>.css</span></button>
+                        <button type="button" class="ext-button" data-ext=".xml" aria-pressed="false">XML<span>.xml</span></button>
+                        <button type="button" class="ext-button" data-ext=".sql" aria-pressed="false">SQL<span>.sql</span></button>
+                    </div>
+                    <div class="custom-input-row">
+                        <label for="customExtInput">其他后缀</label>
+                        <input id="customExtInput" type="text" placeholder="如 .vue, .go, .properties" autocomplete="off" spellcheck="false" aria-describedby="extensionHelp formError">
+                        <button class="button button-secondary" id="addExtBtn" type="button">添加</button>
+                    </div>
+                    <p class="helper" id="extensionHelp">用逗号或空格分隔，按 Enter 添加；搜索时也会包含尚未添加的后缀。</p>
+                    <div class="selected-extensions" id="selectedExtTags" aria-label="已选文件类型"></div>
+                </section>
+            </fieldset>
+            <p class="form-error" id="formError" role="alert" hidden></p>
+            <div class="search-footnote"><span>包含子目录 · UTF-8 文本</span><span>结果自动导出为 Markdown <svg class="icon" aria-hidden="true"><use href="#icon-file"/></svg></span></div>
+        </form>
+
+        <section class="results-panel" aria-labelledby="resultsHeading">
+            <div class="results-heading"><h2 id="resultsHeading">搜索结果<span class="result-count" id="resultCount" hidden>0</span></h2><span class="state-label" id="stateLabel" role="status">准备就绪</span></div>
+            <div class="progress-section" id="progressSection" hidden>
+                <div class="progress-heading"><span id="progressMessage" role="status" aria-live="polite">正在扫描文件…</span><button class="text-button" id="cancelSearchBtn" type="button">取消搜索</button></div>
+                <div class="progress-track" id="progressBar" role="progressbar" aria-label="搜索进度" aria-valuemin="0" aria-valuemax="100"><div id="progressBarFill"></div></div>
+                <div class="progress-caption"><span id="progressFiles">正在统计文件</span><span id="progressTime">0.0 秒</span></div>
             </div>
-        </div>
-        
-        <div class="tips">
-            <div class="tips-title">使用说明</div>
-            <div class="tips-content">
-                <p>1. 在输入框中输入要搜索的文本内容</p>
-                <p>2. 选择搜索模式：全量文件 或 自定义后缀</p>
-                <p>3. 自定义后缀模式下，可点击常用文件类型或输入自定义后缀</p>
-                <p>4. 点击搜索按钮开始搜索</p>
-                <p>5. 搜索结果将以Markdown格式保存到下载目录</p>
+            <div class="empty-state" id="emptyState">
+                <div class="empty-art" aria-hidden="true"><svg viewBox="0 0 100 84"><rect x="18" y="10" width="43" height="58" rx="5" class="back-page"/><rect x="32" y="17" width="43" height="58" rx="5" class="front-page"/><path d="M43 31h20M43 40h15M43 49h11" class="page-lines"/><circle cx="69" cy="58" r="13" class="glass"/><path d="m79 68 11 11" class="glass-handle"/></svg></div>
+                <h3 id="emptyTitle">从一个关键词开始</h3>
+                <p id="emptyDescription">选择目录并输入搜索内容，匹配的文件与行号会显示在这里。</p>
+                <div class="empty-steps" id="emptySteps"><span><b>01</b> 选择目录</span><i></i><span><b>02</b> 输入内容</span><i></i><span><b>03</b> 查看匹配</span></div>
             </div>
-        </div>
-    </div>
+            <div id="resultContent" hidden><div class="result-summary" id="resultSummary" role="status"></div><div class="result-list" id="resultList"></div><p class="preview-note" id="previewNote" hidden></p></div>
+            <div class="export-bar" id="exportBar" hidden>
+                <div class="export-info"><svg class="icon" aria-hidden="true"><use href="#icon-check"/></svg><span><strong>Markdown 已保存</strong><span id="exportFilename"></span></span></div>
+                <div class="export-actions"><button class="button button-secondary" id="openLocationBtn" type="button">打开位置</button><button class="button button-dark" id="openFileBtn" type="button">打开结果<svg class="icon" aria-hidden="true"><use href="#icon-export"/></svg></button></div>
+            </div>
+            <p class="form-error result-error" id="resultError" role="alert" hidden></p>
+            <button class="button button-secondary" id="retryExportBtn" type="button" hidden>重新保存 Markdown</button>
+        </section>
+
+        <footer class="app-footer"><span>文件留在本地，查找更安心。</span><span><kbd>Enter</kbd> 搜索<span class="footer-divider">·</span><kbd>Esc</kbd> 取消搜索</span></footer>
+    </main>
     <script src="index.js"></script>
 </body>
-</html> 
+</html>

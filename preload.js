@@ -1,378 +1,310 @@
-// preload.js - 插件核心逻辑
-const fs = require("node:fs");
-const path = require("node:path");
-const os = require("node:os");
-const { execSync } = require("node:child_process");
+// 文件操作留在 preload，页面只通过 customApis 访问本地能力。
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const { execSync } = require('node:child_process');
+const { createInterface } = require('node:readline');
+const { randomBytes } = require('node:crypto');
 
-// 默认配置
-const DEFAULT_CONFIG = {
-  searchPath: 'C:\\Users'
-};
-
-// 配置存储的key
 const CONFIG_KEY = 'find_and_config';
+const DEFAULT_CONFIG = { searchPath: '', searchType: 'all', extensions: [] };
+const binaryExts = [
+  '.class', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico', '.heic',
+  '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm',
+  '.mp3', '.wav', '.aac', '.ogg', '.flac',
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz',
+  '.exe', '.dll', '.so', '.bin', '.dat', '.apk', '.iso',
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
+  '.woff', '.woff2', '.ttf', '.otf', '.db', '.sqlite'
+];
+let activeSearch = null;
 
-// 获取配置
-function getConfig() {
+function getConfig(requestId) {
+  const startedAt = Date.now();
+  console.debug('file_search.config_read_started', { requestId, key: CONFIG_KEY });
   try {
-    const config = utools.dbStorage.getItem(CONFIG_KEY);
-    if (config) {
-      return config;
-    }
+    const stored = utools.dbStorage.getItem(CONFIG_KEY);
+    const config = stored && typeof stored === 'object' ? stored : {};
+    console.debug('file_search.config_read_completed', { requestId, key: CONFIG_KEY, hit: Boolean(stored), durationMs: Date.now() - startedAt });
+    return { ...DEFAULT_CONFIG, ...config, searchPath: typeof config.searchPath === 'string' ? config.searchPath : '' };
   } catch (error) {
-    console.error('读取配置失败:', error);
+    console.error('file_search.config_read_failed', { requestId, key: CONFIG_KEY, durationMs: Date.now() - startedAt }, error);
+    return { ...DEFAULT_CONFIG, extensions: [] };
   }
-  return DEFAULT_CONFIG;
 }
 
-// 保存配置
-function saveConfig(config) {
+function saveConfig(config, requestId) {
+  const startedAt = Date.now();
+  console.debug('file_search.config_write_started', { requestId, key: CONFIG_KEY, searchPath: config.searchPath });
   try {
     utools.dbStorage.setItem(CONFIG_KEY, config);
+    console.debug('file_search.config_write_completed', { requestId, key: CONFIG_KEY, durationMs: Date.now() - startedAt });
   } catch (error) {
-    console.error('保存配置失败:', error);
+    console.error('file_search.config_write_failed', { requestId, key: CONFIG_KEY, durationMs: Date.now() - startedAt }, error);
+    throw new Error('设置保存失败，请重试。');
   }
 }
 
-const binaryExts = [
-  '.class', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', // 图片
-  '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', // 视频
-  '.mp3', '.wav', '.aac', '.ogg', '.flac', // 音频
-  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', // 压缩包
-  '.exe', '.dll', '.so', '.bin', '.dat', '.apk', '.iso', // 可执行/镜像
-  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx' // 办公文档（可选）
-];
+function normalizeExtensions(value) {
+  return [...new Set(String(value || '').split(/[,，\s]+/).filter(Boolean).map(ext => (ext.startsWith('.') ? ext : '.' + ext).toLowerCase()))];
+}
 
-window.customApis = {
-  // 文件系统操作
-  readFile: (filename) => {
-    return fs.readFileSync(filename, { encoding: "utf-8" });
-  },
-  getFolder: (filepath) => {
-    return path.dirname(filepath);
-  },
-  getOSInfo: () => {
-    return { arch: os.arch(), cpus: os.cpus(), release: os.release() };
-  },
-  execCommand: (command) => {
-    execSync(command);
-  },
-  readdir: (dir) => {
-    return fs.readdirSync(dir);
-  },
-  stat: (filepath) => {
-    return fs.statSync(filepath);
-  },
-  writeFile: (filepath, content) => {
-    return fs.writeFileSync(filepath, content, { encoding: "utf-8" });
-  },
-  pathJoin: (...paths) => {
-    return path.join(...paths);
-  },
+function sanitizeFileName(fileName) {
+  // 按字符截断，避免中文关键词使文件名超过常见文件系统的字节限制。
+  return Array.from(fileName.replace(/[<>:"|?*\\/\x00-\x1f]/g, '_').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 40).join('');
+}
 
-  // 搜索相关方法
-  searchInFile: (filePath, searchText) => {
+function escapeMarkdown(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+}
+
+function formatResultsAsMarkdown(results) {
+  if (!results.length) return '未找到匹配的结果。';
+  const rows = results.map(result => '| ' + [result.project, result.filename, result.fileType, result.lineNumber, result.content].map(escapeMarkdown).join(' | ') + ' |');
+  return ['| 项目名 | 文件名 | 文件类型 | 行号 | 内容 |', '| ------ | ------ | -------- | ---- | ---- |', ...rows].join('\n') + '\n';
+}
+
+async function saveMarkdownFile(content, searchText, requestId) {
+  const startedAt = Date.now();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `search_results_${sanitizeFileName(searchText) || 'search'}_${timestamp}_${randomBytes(3).toString('hex')}.md`;
+  // 文件名包含用户查询；日志只记录目录、长度和关联标识，不记录查询文本。
+  let directory;
+  try {
+    directory = utools.getPath('downloads');
+    console.info('file_search.export_started', { requestId, directory, characters: content.length });
+    const savedPath = path.join(directory, filename);
+    await fs.promises.writeFile(savedPath, content, { encoding: 'utf8', flag: 'wx' });
+    console.info('file_search.export_completed', { requestId, directory, durationMs: Date.now() - startedAt });
+    return savedPath;
+  } catch (error) {
+    // 文件系统异常自带导出文件名，用错误码和去除首行的调用栈避免泄漏搜索内容。
+    console.error('file_search.export_failed', { requestId, directory, code: error.code, durationMs: Date.now() - startedAt, stack: String(error.stack || '').split('\n').slice(1).join('\n') });
+    throw new Error('搜索已完成，但无法保存到下载目录。请检查目录权限和磁盘空间。');
+  }
+}
+
+function assertNotCancelled(task) {
+  if (task.cancelled) {
+    const error = new Error('搜索已取消');
+    error.code = 'SEARCH_CANCELLED';
+    throw error;
+  }
+}
+
+async function collectFiles(root, extensions, task, stats, report) {
+  const directories = [root];
+  const files = [];
+  while (directories.length) {
+    assertNotCancelled(task);
+    const directory = directories.pop();
+    const startedAt = Date.now();
+    let entries;
     try {
-      const content = fs.readFileSync(filePath, { encoding: "utf-8" });
-      const lines = content.split('\n');
-      const results = [];
-
-      lines.forEach((line, index) => {
-        if (line.includes(searchText)) {
-          results.push({
-            lineNumber: index + 1,
-            content: line.trim()
-          });
-        }
-      });
-
-      return results;
+      entries = await fs.promises.readdir(directory, { withFileTypes: true });
     } catch (error) {
-      console.error(`处理文件时发生错误 ${filePath}: ${error.message}`);
-      return [];
+      if (directory === root) throw error;
+      stats.skippedEntries++;
+      console.warn('file_search.directory_skipped', { requestId: task.id, directory, durationMs: Date.now() - startedAt }, error);
+      continue;
     }
-  },
-
-  extractProjectName: (filePath) => {
-    try {
-      const config = getConfig();
-      // 1. 获取配置的根目录
-      let root = config.searchPath.replace(/\//g, '\\');
-      // 2. 转义正则特殊字符
-      root = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // 3. 构造正则
-      const reg = new RegExp(root + '\\\\(.*?)\\\\');
-      // 4. 匹配
-      const pathStr = filePath.replace(/\//g, '\\');
-      const match = pathStr.match(reg) || [];
-      return match[1] || "unknown";
-    } catch (error) {
-      console.error(`提取项目名时发生错误: ${error.message}`);
-      return "unknown";
-    }
-  },
-
-  formatResultsAsMarkdown: (results) => {
-    if (!results || results.length === 0) {
-      return "未找到匹配的结果。";
-    }
-
-    let markdown = "| 项目名 | 文件名 | 文件类型 | 行号 | 内容 |\n";
-    markdown += "| ------ | ------ | -------- | ---- | ---- |\n";
-
-    results.forEach(result => {
-      const content = result.content.replace(/\|/g, '\\|');
-      markdown += `| ${result.project} | ${result.filename} | ${result.fileType} | ${result.lineNumber} | ${content} |\n`;
-    });
-
-    return markdown;
-  },
-
-  // 清理文件名中的非法字符
-  sanitizeFileName: (fileName) => {
-    // 替换文件系统不允许的字符为下划线
-    // Windows: < > : " | ? * \ /
-    // 同时处理其他可能有问题的字符
-    return fileName
-      .replace(/[<>:"|?*\\/]/g, '_')  // 替换非法字符为下划线
-      .replace(/\s+/g, '_')          // 替换空格为下划线
-      .replace(/_{2,}/g, '_')        // 多个连续下划线替换为单个
-      .replace(/^_+|_+$/g, '')       // 去除开头和结尾的下划线
-      .substring(0, 100);            // 限制文件名长度，避免过长
-  },
-
-  saveMarkdownFile: (content, searchText) => {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    // 清理搜索文本，确保可以作为文件名使用
-    const cleanSearchText = window.customApis.sanitizeFileName(searchText) || 'search';
-    const fileName = `search_results_${cleanSearchText}_${timestamp}.md`;
-    const filePath = path.join(utools.getPath('downloads'), fileName);
-
-    try {
-      fs.writeFileSync(filePath, content, { encoding: "utf-8" });
-      console.log('文件保存成功:', filePath);
-      return filePath;
-    } catch (error) {
-      console.error('保存文件时发生错误:', error);
-      console.error('文件路径:', filePath);
-      console.error('原始搜索文本:', searchText);
-      console.error('清理后文件名:', fileName);
-      throw error;
-    }
-  },
-
-  performSearch: (searchText, searchType, customExts, onProgress) => {
-    return new Promise((resolve) => {
-      const config = getConfig();
-      const results = [];
-      let matchedFiles = 0;
-      let lastUpdateTime = Date.now();
-      let savedPath = null;
-
-      // 解析自定义后缀
-      let extList = [];
-      if (searchType === 'custom' && customExts) {
-        extList = customExts.split(',').map(e => {
-          e = e.trim().toLowerCase();
-          // 确保后缀以点开头
-          if (e && !e.startsWith('.')) {
-            e = '.' + e;
-          }
-          return e;
-        }).filter(e => e && e.length > 1);
+    console.debug('file_search.directory_loaded', { requestId: task.id, directory, count: entries.length, durationMs: Date.now() - startedAt });
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index];
+      const filePath = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        stats.ignoredLinks++;
+      } else if (entry.isDirectory()) {
+        directories.push(filePath);
+      } else if (entry.isFile()) {
+        const extension = path.extname(entry.name).toLowerCase();
+        if (!binaryExts.includes(extension) && (!extensions || extensions.includes(extension))) files.push(filePath);
       }
+      if (index % 500 === 499) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assertNotCancelled(task);
+      }
+    }
+    stats.totalFiles = files.length;
+    report('scanning', `正在扫描目录，已找到 ${files.length} 个可搜索文件`);
+  }
+  return files;
+}
 
-      // 异步统计文件总数
-      let totalFiles = 0;
-      function countFilesAsync(dir) {
-        return new Promise((countResolve) => {
-          onProgress(0, 0, 0, { type: 'scanning', message: '正在扫描文件...' });
-
-          // 使用 setTimeout 让UI有机会更新
-          setTimeout(() => {
-            try {
-              function traverse(currentDir) {
-                const files = fs.readdirSync(currentDir);
-                files.forEach(file => {
-                  const filePath = path.join(currentDir, file);
-                  const stat = fs.statSync(filePath);
-                  if (stat.isDirectory()) {
-                    traverse(filePath);
-                  } else {
-                    if (searchType === 'all') {
-                      if (window.customApis.isTextFile(filePath)) totalFiles++;
-                    } else if (searchType === 'custom') {
-                      if (extList.includes(path.extname(file).toLowerCase())) totalFiles++;
-                    }
-                  }
-                });
-              }
-              traverse(dir);
-              onProgress(0, totalFiles, 0, { type: 'scanning', message: `扫描完成，共找到 ${totalFiles} 个文件，开始搜索...` });
-              countResolve();
-            } catch (error) {
-              console.error('统计文件时发生错误:', error);
-              countResolve();
-            }
-          }, 100); // 减少延迟到100ms，让UI能够立即响应
+async function searchFile(filePath, searchText, root, task, report) {
+  const startedAt = Date.now();
+  console.debug('file_search.file_started', { requestId: task.id, filePath });
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const reader = createInterface({ input: stream, crlfDelay: Infinity });
+  const matches = [];
+  let lineNumber = 0;
+  task.stream = stream;
+  task.reader = reader;
+  try {
+    for await (const line of reader) {
+      assertNotCancelled(task);
+      lineNumber++;
+      if (line.includes(searchText)) {
+        const relativePath = path.relative(root, filePath);
+        matches.push({
+          project: relativePath.includes(path.sep) ? relativePath.split(path.sep)[0] : path.basename(root),
+          filename: path.basename(filePath),
+          fileType: path.extname(filePath),
+          filePath,
+          relativePath,
+          lineNumber,
+          content: line.trim()
         });
       }
-
-      // 先异步扫描文件，然后开始搜索
-      countFilesAsync(config.searchPath).then(() => {
-        let processedFiles = 0;
-        function searchFiles(dir) {
-          try {
-            function traverse(currentDir) {
-              const files = fs.readdirSync(currentDir);
-              files.forEach(file => {
-                const filePath = path.join(currentDir, file);
-                const stat = fs.statSync(filePath);
-                if (stat.isDirectory()) {
-                  traverse(filePath);
-                } else {
-                  let match = false;
-                  let fileType = path.extname(file);
-                  if (searchType === 'all') {
-                    match = window.customApis.isTextFile(filePath);
-                  } else if (searchType === 'custom') {
-                    match = extList.includes(fileType.toLowerCase());
-                  }
-                  if (match) {
-                    processedFiles++;
-                    const fileResults = window.customApis.searchInFile(filePath, searchText);
-                    if (fileResults.length > 0) {
-                      matchedFiles++;
-                      const projectName = window.customApis.extractProjectName(filePath);
-                      fileResults.forEach(match => {
-                        results.push({
-                          project: projectName,
-                          filename: file,
-                          fileType: fileType,
-                          lineNumber: match.lineNumber,
-                          content: match.content
-                        });
-                      });
-                    }
-                    // 进度更新 - 减少更新频率到500ms
-                    const currentTime = Date.now();
-                    if (currentTime - lastUpdateTime >= 500) {
-                      const percentage = Math.round((processedFiles / totalFiles) * 100);
-                      onProgress(processedFiles, totalFiles, matchedFiles, {
-                        type: 'searching',
-                        message: `正在搜索... ${percentage}% (${processedFiles}/${totalFiles} 个文件) - 已找到 ${matchedFiles} 个匹配文件`
-                      });
-                      lastUpdateTime = currentTime;
-                    }
-                  }
-                }
-              });
-            }
-            traverse(dir);
-          } catch (error) {
-            console.error('搜索文件时发生错误:', error);
-          }
-        }
-
-        try {
-          searchFiles(config.searchPath);
-          const markdown = window.customApis.formatResultsAsMarkdown(results);
-          savedPath = window.customApis.saveMarkdownFile(markdown, searchText);
-
-          onProgress(totalFiles, totalFiles, matchedFiles, {
-            type: 'complete',
-            message: `搜索完成！共搜索 ${totalFiles} 个文件，找到 ${matchedFiles} 个匹配文件，${results.length} 个匹配行。结果已保存到: ${savedPath}`
-          });
-
-          resolve({
-            success: true,
-            message: `搜索完成！共搜索 ${totalFiles} 个文件，找到 ${matchedFiles} 个匹配文件，${results.length} 个匹配行。结果已保存到: ${savedPath}`,
-            results: results,
-            stats: {
-              totalFiles,
-              matchedFiles,
-              totalMatches: results.length
-            },
-            savedPath: savedPath
-          });
-        } catch (error) {
-          onProgress(0, totalFiles, 0, {
-            type: 'error',
-            message: `搜索出错: ${error.message}`
-          });
-
-          resolve({
-            success: false,
-            message: `搜索出错: ${error.message}`,
-            results: [],
-            stats: {
-              totalFiles,
-              matchedFiles,
-              totalMatches: 0
-            },
-            savedPath: null
-          });
-        }
-      });
-    });
-  },
-
-  // 配置相关方法
-  getConfig: () => getConfig(),
-  saveConfig: (config) => saveConfig(config),
-
-  // 打开文件位置（选中文件但不打开）
-  openFileLocation: (filePath) => {
-    try {
-      if (process.platform === 'win32') {
-        execSync(`explorer /select,"${filePath}"`);
-      } else if (process.platform === 'darwin') {
-        execSync(`open -R "${filePath}"`);
-      } else {
-        execSync(`xdg-open "${path.dirname(filePath)}"`);
+      if (lineNumber % 1000 === 0) {
+        report('searching', '正在读取文件内容…');
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
-    } catch (error) {
-      console.error('打开文件位置失败:', error);
-      throw error;
     }
-  },
+    assertNotCancelled(task);
+    console.debug('file_search.file_completed', { requestId: task.id, filePath, lines: lineNumber, matches: matches.length, durationMs: Date.now() - startedAt });
+    return matches;
+  } finally {
+    reader.close();
+    stream.destroy();
+    task.stream = null;
+    task.reader = null;
+  }
+}
 
-  // 直接打开文件（用系统默认程序）
-  openFile: (filePath) => {
-    try {
-      if (process.platform === 'win32') {
-        // Windows: 使用 start 命令打开文件
-        execSync(`start "" "${filePath}"`, { shell: true });
-      } else if (process.platform === 'darwin') {
-        // macOS: 使用 open 命令打开文件
-        execSync(`open "${filePath}"`);
-      } else {
-        // Linux: 使用 xdg-open 打开文件
-        execSync(`xdg-open "${filePath}"`);
+async function performSearch(searchText, searchType, customExts, onProgress = () => {}, options = {}) {
+  const startedAt = Date.now();
+  const requestId = options.requestId || randomBytes(8).toString('hex');
+  const stats = { totalFiles: 0, processedFiles: 0, matchedFiles: 0, totalMatches: 0, skippedEntries: 0, ignoredLinks: 0, durationMs: 0 };
+  console.info('file_search.request_received', { requestId, searchType, queryLength: typeof searchText === 'string' ? searchText.length : 0 });
+  if (activeSearch) {
+    console.warn('file_search.request_busy', { requestId, activeRequestId: activeSearch.id });
+    return { success: false, requestId, message: '已有搜索正在进行，请稍后再试。', results: [], stats };
+  }
+  const task = { id: requestId, cancelled: false, phase: 'validating', stream: null, reader: null };
+  activeSearch = task;
+  let lastProgressAt = 0;
+  let root;
+  const results = [];
+  const report = (type, message, force = false) => {
+    if (!force && Date.now() - lastProgressAt < 100) return;
+    lastProgressAt = Date.now();
+    onProgress(stats.processedFiles, stats.totalFiles, stats.matchedFiles, { type, message, requestId, totalMatches: stats.totalMatches, durationMs: Date.now() - startedAt });
+  };
+  try {
+    const config = getConfig(requestId);
+    root = config.searchPath;
+    const extensions = normalizeExtensions(customExts);
+    if (typeof searchText !== 'string' || !searchText.trim()) throw new Error('请输入要搜索的内容。');
+    if (!root) throw new Error('请先选择要搜索的目录。');
+    if (!['all', 'custom'].includes(searchType)) throw new Error('请选择有效的文件范围。');
+    if (searchType === 'custom' && (!extensions.length || extensions.some(ext => !/^\.[a-z0-9_+-]+$/.test(ext) || binaryExts.includes(ext)))) {
+      throw new Error('请选择有效的文本文件后缀，不能使用图片、视频等二进制文件类型。');
+    }
+    console.info('file_search.parameters_validated', { requestId, root, searchType, extensions: searchType === 'custom' ? extensions : [] });
+    task.phase = 'scanning';
+    const scanStartedAt = Date.now();
+    report('scanning', '正在扫描目录…', true);
+    console.info('file_search.scan_started', { requestId, root });
+    const files = await collectFiles(root, searchType === 'custom' ? extensions : null, task, stats, report);
+    assertNotCancelled(task);
+    console.info('file_search.scan_completed', { requestId, root, ...stats, durationMs: Date.now() - scanStartedAt });
+    task.phase = 'searching';
+    report('searching', `正在搜索 ${files.length} 个文件…`, true);
+    const searchStartedAt = Date.now();
+    console.info('file_search.content_started', { requestId, count: files.length });
+    for (const filePath of files) {
+      assertNotCancelled(task);
+      const fileStartedAt = Date.now();
+      try {
+        const matches = await searchFile(filePath, searchText, root, task, report);
+        if (matches.length) stats.matchedFiles++;
+        for (const match of matches) results.push(match);
+        stats.totalMatches += matches.length;
+      } catch (error) {
+        if (task.cancelled) throw error;
+        stats.skippedEntries++;
+        console.warn('file_search.file_skipped', { requestId, filePath, durationMs: Date.now() - fileStartedAt }, error);
       }
-      console.log('文件打开成功:', filePath);
-    } catch (error) {
-      console.error('打开文件失败:', error);
-      throw error;
+      stats.processedFiles++;
+      report('searching', `已搜索 ${stats.processedFiles} / ${stats.totalFiles} 个文件`);
     }
-  },
+    assertNotCancelled(task);
+    console.info('file_search.content_completed', { requestId, ...stats, durationMs: Date.now() - searchStartedAt });
+    task.phase = 'exporting';
+    report('exporting', '搜索完成，正在保存 Markdown…', true);
+    let savedPath = null;
+    let exportError = null;
+    try {
+      savedPath = await saveMarkdownFile(formatResultsAsMarkdown(results), searchText, requestId);
+    } catch (error) {
+      exportError = error.message;
+    }
+    stats.durationMs = Date.now() - startedAt;
+    report('complete', '搜索完成', true);
+    console.info('file_search.completed', { requestId, ...stats, exported: Boolean(savedPath) });
+    return { success: true, requestId, results, stats, savedPath, exportError };
+  } catch (error) {
+    stats.durationMs = Date.now() - startedAt;
+    if (task.cancelled) {
+      console.info('file_search.cancelled', { requestId, phase: task.phase, ...stats });
+      return { success: false, cancelled: true, requestId, message: '搜索已取消，未生成结果文件。', results: [], stats, savedPath: null };
+    }
+    console.error('file_search.failed', { requestId, phase: task.phase, root, ...stats }, error);
+    const message = ['ENOENT', 'ENOTDIR'].includes(error.code) ? '搜索目录不存在，请重新选择目录。' : error.code === 'EACCES' || error.code === 'EPERM' ? '无法读取搜索目录，请检查访问权限。' : error.message;
+    return { success: false, requestId, message, results: [], stats, savedPath: null };
+  } finally {
+    if (activeSearch === task) activeSearch = null;
+  }
+}
 
+function cancelSearch(requestId) {
+  if (!activeSearch || activeSearch.id !== requestId || activeSearch.phase === 'exporting') return false;
+  activeSearch.cancelled = true;
+  if (activeSearch.reader) activeSearch.reader.close();
+  if (activeSearch.stream) activeSearch.stream.destroy();
+  console.info('file_search.cancel_requested', { requestId, phase: activeSearch.phase });
+  return true;
+}
+
+async function openResult(filePath, reveal, requestId) {
+  const startedAt = Date.now();
+  const action = reveal ? 'reveal' : 'open';
+  console.info('file_search.result_open_started', { requestId, action });
+  try {
+    await fs.promises.access(filePath);
+    const errorMessage = reveal ? await utools.shellShowItemInFolder(filePath) : await utools.shellOpenPath(filePath);
+    if (typeof errorMessage === 'string' && errorMessage) throw new Error('系统无法打开结果文件，请检查默认应用设置。');
+    console.info('file_search.result_open_completed', { requestId, action, durationMs: Date.now() - startedAt });
+  } catch (error) {
+    console.error('file_search.result_open_failed', { requestId, action, code: error.code, durationMs: Date.now() - startedAt, stack: String(error.stack || '').split('\n').slice(1).join('\n') });
+    throw new Error(error.code === 'ENOENT' ? '结果文件已被移动或删除，请重新搜索。' : '无法打开结果，请检查文件权限或默认应用设置。');
+  }
+}
+
+window.customApis = {
+  readFile: filename => fs.readFileSync(filename, { encoding: 'utf8' }),
+  getFolder: filepath => path.dirname(filepath),
+  getOSInfo: () => ({ arch: os.arch(), cpus: os.cpus(), release: os.release() }),
+  execCommand: command => execSync(command),
+  readdir: directory => fs.readdirSync(directory),
+  stat: filepath => fs.statSync(filepath),
+  writeFile: (filepath, content) => fs.writeFileSync(filepath, content, { encoding: 'utf8' }),
+  pathJoin: (...paths) => path.join(...paths),
+  getConfig,
+  saveConfig,
+  normalizeExtensions,
+  sanitizeFileName,
+  formatResultsAsMarkdown,
+  saveMarkdownFile,
+  performSearch,
+  cancelSearch,
+  openFile: (filePath, requestId) => openResult(filePath, false, requestId),
+  openFileLocation: (filePath, requestId) => openResult(filePath, true, requestId),
   selectDirectory: () => {
-    // utools.showOpenDialog 返回数组，取第一个
-    const paths = utools.showOpenDialog({
-        properties: ['openDirectory']
-    });
+    const paths = utools.showOpenDialog({ title: '选择搜索目录', properties: ['openDirectory'] });
     return paths && paths[0] ? paths[0] : null;
   },
-
-  isTextFile: (filePath) => {
-    const ext = path.extname(filePath).toLowerCase();
-    return !binaryExts.includes(ext);
-  },
-
-  getBinaryExts: () => {
-    return binaryExts;
-  }
+  isTextFile: filePath => !binaryExts.includes(path.extname(filePath).toLowerCase()),
+  getBinaryExts: () => [...binaryExts]
 };
-
-
