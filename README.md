@@ -187,11 +187,13 @@ find_and/
 ├── index.js            # 前端逻辑
 ├── preload.js          # 后端逻辑
 ├── plugin.json         # 插件配置
-├── logo.png           # 插件图标
+├── logo-v2.png        # 插件图标（256×256 PNG）
 ├── tests/             # Node.js 内置测试运行器的回归测试
 ├── docs/images/       # 界面示例截图
 └── README.md          # 说明文档
 ```
+
+插件图标使用 [logo-v2.png](./logo-v2.png)，尺寸为 256×256 像素。生成方式和完整提示词见 [图标生成说明](./docs/logo-generation.md)。
 
 ## 📄 开源协议
 

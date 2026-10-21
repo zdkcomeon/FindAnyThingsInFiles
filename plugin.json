@@ -5,7 +5,7 @@
   "author": "dongkun",
   "main": "index.html",
   "preload": "preload.js",
-  "logo": "logo.png",
+  "logo": "logo-v2.png",
   "platform": ["win32", "darwin", "linux"],
   "features": [
     {
@@ -15,4 +15,4 @@
       "type": "over"
     }
   ]
-} 
+}
