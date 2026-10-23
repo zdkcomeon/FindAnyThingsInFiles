@@ -267,18 +267,32 @@ function cancelSearch(requestId) {
   return true;
 }
 
-async function openResult(filePath, reveal, requestId) {
+async function openResult(filePath, reveal, requestId, source = false) {
   const startedAt = Date.now();
   const action = reveal ? 'reveal' : 'open';
-  console.info('file_search.result_open_started', { requestId, action });
+  const target = source ? 'source' : 'export';
+  console.info('file_search.result_open_started', { requestId, action, target });
   try {
     await fs.promises.access(filePath);
     const errorMessage = reveal ? await utools.shellShowItemInFolder(filePath) : await utools.shellOpenPath(filePath);
     if (typeof errorMessage === 'string' && errorMessage) throw new Error('系统无法打开结果文件，请检查默认应用设置。');
-    console.info('file_search.result_open_completed', { requestId, action, durationMs: Date.now() - startedAt });
+    console.info('file_search.result_open_completed', { requestId, action, target, durationMs: Date.now() - startedAt });
   } catch (error) {
-    console.error('file_search.result_open_failed', { requestId, action, code: error.code, durationMs: Date.now() - startedAt, stack: String(error.stack || '').split('\n').slice(1).join('\n') });
+    console.error('file_search.result_open_failed', { requestId, action, target, code: error.code, durationMs: Date.now() - startedAt, stack: String(error.stack || '').split('\n').filter(line => /^\s+at /.test(line)).join('\n') });
+    if (source) throw new Error(error.code === 'ENOENT' ? '原文件已被移动或删除，请重新搜索。' : '无法打开原文件，请检查文件权限或默认应用设置。');
     throw new Error(error.code === 'ENOENT' ? '结果文件已被移动或删除，请重新搜索。' : '无法打开结果，请检查文件权限或默认应用设置。');
+  }
+}
+
+function copyText(text, requestId) {
+  const startedAt = Date.now();
+  console.info('file_search.clipboard_started', { requestId, characters: text.length });
+  try {
+    if (utools.copyText(text) === false) throw new Error('Clipboard write failed');
+    console.info('file_search.clipboard_completed', { requestId, characters: text.length, durationMs: Date.now() - startedAt });
+  } catch (error) {
+    console.error('file_search.clipboard_failed', { requestId, characters: text.length, durationMs: Date.now() - startedAt, code: error.code, stack: String(error.stack || '').split('\n').filter(line => /^\s+at /.test(line)).join('\n') });
+    throw new Error('复制失败，请重试或手动选择文本复制。');
   }
 }
 
@@ -301,6 +315,9 @@ window.customApis = {
   cancelSearch,
   openFile: (filePath, requestId) => openResult(filePath, false, requestId),
   openFileLocation: (filePath, requestId) => openResult(filePath, true, requestId),
+  openSourceFile: (filePath, requestId) => openResult(filePath, false, requestId, true),
+  openSourceFileLocation: (filePath, requestId) => openResult(filePath, true, requestId, true),
+  copyText,
   selectDirectory: () => {
     const paths = utools.showOpenDialog({ title: '选择搜索目录', properties: ['openDirectory'] });
     return paths && paths[0] ? paths[0] : null;

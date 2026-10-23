@@ -189,6 +189,27 @@ test('uses host file-opening APIs and handles both old and new API return values
     await assert.rejects(api.openFile(path.join(root, 'missing.md')), /移动或删除/);
 });
 
+test('opens original files and copies text with contextual errors and redacted logs', async t => {
+    const { api, root, opened, logs, utools } = await createHarness(t);
+    const filename = path.join(root, 'source.txt');
+    const secret = 'example_token=private-value';
+    const copied = [];
+    utools.copyText = text => { copied.push(text); return true; };
+    await fs.promises.writeFile(filename, secret);
+    await api.openSourceFile(filename, 'source-actions');
+    await api.openSourceFileLocation(filename, 'source-actions');
+    api.copyText(secret, 'source-actions');
+    assert.deepEqual(opened, [['open', filename], ['reveal', filename]]);
+    assert.deepEqual(copied, [secret]);
+    await assert.rejects(api.openSourceFile(path.join(root, 'missing.txt')), /原文件已被移动或删除/);
+    utools.copyText = () => false;
+    assert.throws(() => api.copyText(secret, 'copy-failure'), /复制失败/);
+    utools.copyText = () => { throw new Error(secret); };
+    assert.throws(() => api.copyText(secret, 'copy-exception'), /复制失败/);
+    assert.ok(!JSON.stringify(logs).includes(secret));
+    assert.ok(logs.every(([event]) => /^[a-z0-9_.]+$/.test(event)));
+});
+
 test('cleans reserved filename characters and bounds Unicode filename length', async t => {
     const { api } = await createHarness(t);
     assert.equal(api.sanitizeFileName(' /a:b?*|<>\\\\ '), 'a_b');

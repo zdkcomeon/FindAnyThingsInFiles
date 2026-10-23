@@ -29,12 +29,27 @@
         </header>
 
         <section class="intro" aria-labelledby="pageTitle">
-            <p class="eyebrow">LESS SEARCHING, MORE FINDING</p>
-            <h1 id="pageTitle">每一处匹配，都有迹可循。</h1>
-            <p>查找代码、日志与文档中的文本，让散落的内容一目了然。</p>
+            <h1 id="pageTitle">搜索文件内容</h1>
+            <p>在本地代码、日志与文档中查找原文。</p>
         </section>
 
         <p class="notice" id="environmentNotice" role="status" hidden>请在 uTools 中打开插件，以选择目录并搜索本地文件。</p>
+
+        <section class="progress-section" id="progressSection" aria-label="当前搜索任务" hidden>
+            <div class="progress-heading"><span id="progressMessage" role="status">正在扫描文件…</span><button class="button button-secondary" id="cancelSearchBtn" type="button">取消搜索</button></div>
+            <div class="progress-track" id="progressBar" role="progressbar" aria-label="搜索进度" aria-valuemin="0" aria-valuemax="100"><div id="progressBarFill"></div></div>
+            <div class="progress-caption"><span id="progressFiles">正在统计文件</span><span id="progressTime">0.0 秒</span></div>
+        </section>
+
+        <section class="search-feedback" id="searchFeedback" aria-label="搜索提示" hidden>
+            <p id="searchFeedbackMessage" role="status"></p>
+            <div class="recovery-actions">
+                <button class="button button-secondary" id="changeDirectoryBtn" type="button">重新选择目录</button>
+                <button class="button button-secondary" id="editQueryBtn" type="button">修改关键词</button>
+                <button class="button button-secondary" id="widenScopeBtn" type="button" hidden>改搜全部文本文件</button>
+                <button class="button button-secondary" id="retrySearchBtn" type="submit" form="searchForm">重新搜索</button>
+            </div>
+        </section>
 
         <form class="search-panel" id="searchForm" novalidate>
             <fieldset id="searchControls">
@@ -50,11 +65,14 @@
                     <button class="button button-primary search-button" id="searchButton" type="submit"><span id="searchButtonLabel">开始搜索</span><svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></button>
                 </div>
 
-                <button class="path-picker" id="updatePathBtn" type="button" aria-describedby="pathHint">
-                    <span class="folder-icon"><svg class="icon" aria-hidden="true"><use href="#icon-folder"/></svg></span>
-                    <span class="path-copy"><span class="path-label">搜索目录</span><span class="path-value" id="searchPath">选择要搜索的文件夹</span></span>
-                    <span class="path-action" id="pathAction">选择目录</span><svg class="icon path-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
-                </button>
+                <div class="path-row">
+                    <button class="path-picker" id="updatePathBtn" type="button" aria-describedby="pathHint">
+                        <span class="folder-icon"><svg class="icon" aria-hidden="true"><use href="#icon-folder"/></svg></span>
+                        <span class="path-copy"><span class="path-label">搜索目录</span><span class="path-value" id="searchPath">选择要搜索的文件夹</span></span>
+                        <span class="path-action" id="pathAction">选择目录</span><svg class="icon path-chevron" aria-hidden="true"><use href="#icon-chevron"/></svg>
+                    </button>
+                    <button class="button button-secondary" id="copyDirectoryBtn" type="button" hidden>复制目录</button>
+                </div>
                 <p class="sr-only" id="pathHint">包含所有子目录，自动记住上次选择的目录。</p>
 
                 <div class="filter-row">
@@ -63,6 +81,7 @@
                         <label><input type="radio" name="searchType" value="all" checked><span>全部文本文件</span></label>
                         <label><input type="radio" name="searchType" value="custom" aria-controls="customExtPanel"><span>指定文件类型</span></label>
                     </div>
+                    <button class="text-button" id="toggleExtBtn" type="button" aria-controls="customExtPanel" aria-expanded="false" hidden>调整类型</button>
                     <span class="filter-hint" id="filterHint">自动排除图片、视频等二进制文件</span>
                 </div>
 
@@ -87,7 +106,8 @@
                         <input id="customExtInput" type="text" placeholder="如 .vue, .go, .properties" autocomplete="off" spellcheck="false" aria-describedby="extensionHelp formError">
                         <button class="button button-secondary" id="addExtBtn" type="button">添加</button>
                     </div>
-                    <p class="helper" id="extensionHelp">用逗号或空格分隔，按 Enter 添加；搜索时也会包含尚未添加的后缀。</p>
+                    <p class="helper" id="extensionHelp">用逗号或空格分隔，按 Enter 或点击添加确认；开始搜索时会自动确认有效输入。</p>
+                    <p class="helper pending-extensions" id="pendingExtNote" role="status" hidden></p>
                     <div class="selected-extensions" id="selectedExtTags" aria-label="已选文件类型"></div>
                 </section>
             </fieldset>
@@ -96,28 +116,30 @@
         </form>
 
         <section class="results-panel" aria-labelledby="resultsHeading">
-            <div class="results-heading"><h2 id="resultsHeading">搜索结果<span class="result-count" id="resultCount" hidden>0</span></h2><span class="state-label" id="stateLabel" role="status">准备就绪</span></div>
-            <div class="progress-section" id="progressSection" hidden>
-                <div class="progress-heading"><span id="progressMessage" role="status" aria-live="polite">正在扫描文件…</span><button class="text-button" id="cancelSearchBtn" type="button">取消搜索</button></div>
-                <div class="progress-track" id="progressBar" role="progressbar" aria-label="搜索进度" aria-valuemin="0" aria-valuemax="100"><div id="progressBarFill"></div></div>
-                <div class="progress-caption"><span id="progressFiles">正在统计文件</span><span id="progressTime">0.0 秒</span></div>
-            </div>
+            <div class="results-heading"><h2 id="resultsHeading">搜索结果<span class="result-count" id="resultCount" hidden>0</span></h2><div class="results-heading-actions"><button class="text-button" id="focusResultsBtn" type="button" hidden>浏览结果</button><span class="state-label" id="stateLabel" role="status">准备就绪</span></div></div>
+            <p class="previous-results-note" id="previousResultsNote" role="status" hidden></p>
+            <div class="result-context" id="resultContext" hidden><span>关键词：<strong id="resultQuery"></strong></span><span>目录：<span class="path-value" id="resultPath"></span></span><span id="resultScope"></span></div>
+            <p class="sr-only" id="actionFeedback" role="status"></p>
+            <p class="form-error result-error" id="resultError" role="alert" hidden></p>
+            <button class="button button-secondary" id="retryExportBtn" type="button" hidden>重新保存 Markdown</button>
             <div class="empty-state" id="emptyState">
                 <div class="empty-art" aria-hidden="true"><svg viewBox="0 0 100 84"><rect x="18" y="10" width="43" height="58" rx="5" class="back-page"/><rect x="32" y="17" width="43" height="58" rx="5" class="front-page"/><path d="M43 31h20M43 40h15M43 49h11" class="page-lines"/><circle cx="69" cy="58" r="13" class="glass"/><path d="m79 68 11 11" class="glass-handle"/></svg></div>
                 <h3 id="emptyTitle">从一个关键词开始</h3>
                 <p id="emptyDescription">选择目录并输入搜索内容，匹配的文件与行号会显示在这里。</p>
                 <div class="empty-steps" id="emptySteps"><span><b>01</b> 选择目录</span><i></i><span><b>02</b> 输入内容</span><i></i><span><b>03</b> 查看匹配</span></div>
             </div>
-            <div id="resultContent" hidden><div class="result-summary" id="resultSummary" role="status"></div><div class="result-list" id="resultList"></div><p class="preview-note" id="previewNote" hidden></p></div>
+            <div id="resultContent" hidden>
+                <div class="result-summary" id="resultSummary" role="status"></div>
+                <div class="result-list" id="resultList" tabindex="-1" aria-label="匹配文件和行；Tab 浏览操作，Enter 打开文件"></div>
+                <div class="preview-controls"><p class="preview-note" id="previewNote" role="status" hidden></p><button class="button button-secondary" id="loadMoreBtn" type="button" hidden>再显示 100 行</button></div>
+            </div>
             <div class="export-bar" id="exportBar" hidden>
                 <div class="export-info"><svg class="icon" aria-hidden="true"><use href="#icon-check"/></svg><span><strong>Markdown 已保存</strong><span id="exportFilename"></span></span></div>
                 <div class="export-actions"><button class="button button-secondary" id="openLocationBtn" type="button">打开位置</button><button class="button button-dark" id="openFileBtn" type="button">打开结果<svg class="icon" aria-hidden="true"><use href="#icon-export"/></svg></button></div>
             </div>
-            <p class="form-error result-error" id="resultError" role="alert" hidden></p>
-            <button class="button button-secondary" id="retryExportBtn" type="button" hidden>重新保存 Markdown</button>
         </section>
 
-        <footer class="app-footer"><span>文件留在本地，查找更安心。</span><span><kbd>Enter</kbd> 搜索<span class="footer-divider">·</span><kbd>Esc</kbd> 取消搜索</span></footer>
+        <footer class="app-footer"><span>文件留在本地，查找更安心。</span><span><kbd>Enter</kbd> 搜索 / 打开文件<span class="footer-divider">·</span><kbd>Esc</kbd> 取消<span class="footer-divider">·</span><kbd>Tab</kbd> 浏览操作</span></footer>
     </main>
     <script src="index.js"></script>
 </body>
