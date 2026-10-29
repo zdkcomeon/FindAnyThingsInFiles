@@ -79,6 +79,67 @@ test('normalizes custom extensions and rejects empty or binary selections', asyn
     }
 });
 
+test('excludes Python wheel archives regardless of extension case', async t => {
+    const { api, root } = await createHarness(t);
+    await fs.promises.mkdir(path.join(root, 'nested'));
+    for (const file of ['package.whl', path.join('nested', 'package.WHL'), 'notes.txt']) {
+        await fs.promises.writeFile(path.join(root, file), 'target');
+    }
+    const result = await api.performSearch('target', 'all', '');
+    assert.equal(result.success, true);
+    assert.equal(result.stats.totalFiles, 1);
+    assert.deepEqual(Array.from(result.results, match => match.filename), ['notes.txt']);
+    for (const extensions of ['.whl', '.WHL', '.txt,.whl']) {
+        assert.equal((await api.performSearch('target', 'custom', extensions)).success, false, extensions);
+    }
+});
+
+test('excludes exact filenames in every directory alongside the selected file types', async t => {
+    const { api, root } = await createHarness(t);
+    await fs.promises.mkdir(path.join(root, 'nested'));
+    for (const file of ['skip.js', 'keep.js', 'Case.js', 'keep.txt', path.join('nested', 'skip.js'), path.join('nested', 'keep.js')]) {
+        await fs.promises.writeFile(path.join(root, file), 'target');
+    }
+    const options = { excludedFiles: ['skip.js', 'case.js'] };
+    const custom = await api.performSearch('target', 'custom', '.js', () => {}, options);
+    assert.equal(custom.success, true);
+    assert.equal(custom.stats.totalFiles, 3);
+    assert.deepEqual(Array.from(custom.results, result => result.relativePath).sort(), ['Case.js', 'keep.js', path.join('nested', 'keep.js')].sort());
+    const all = await api.performSearch('target', 'all', '', () => {}, options);
+    assert.equal(all.stats.totalFiles, 4);
+    assert.ok(all.results.some(result => result.filename === 'keep.txt'));
+    assert.equal((await api.performSearch('target', 'all', '', () => {}, { excludedFiles: 'skip.js' })).success, false);
+});
+
+test('excludes AGENTS.md in nested directories while keeping other selected Markdown files', async t => {
+    const { api, root } = await createHarness(t);
+    await fs.promises.mkdir(path.join(root, 'nested'));
+    await fs.promises.mkdir(path.join(root, 'other'));
+    for (const file of ['AGENTS.md', path.join('nested', 'AGENTS.md'), path.join('other', 'agents.md'), 'README.md', 'notes.txt']) {
+        await fs.promises.writeFile(path.join(root, file), 'target');
+    }
+    const result = await api.performSearch('target', 'custom', '.md', () => {}, { excludedFiles: ['AGENTS.md'] });
+    assert.equal(result.success, true);
+    assert.deepEqual(Array.from(result.results, match => match.filename).sort(), ['README.md', 'agents.md'].sort());
+});
+
+test('excludes log extensions case-insensitively alongside file names and selected types', async t => {
+    const { api, root } = await createHarness(t);
+    await fs.promises.mkdir(path.join(root, 'nested'));
+    for (const file of ['app.log', 'keep.js', 'skip.js', path.join('nested', 'APP.LOG')]) {
+        await fs.promises.writeFile(path.join(root, file), 'target');
+    }
+    const all = await api.performSearch('target', 'all', '');
+    assert.equal(all.stats.totalFiles, 4);
+    const options = { excludedFiles: ['skip.js'], excludedExtensions: ['.LOG'] };
+    const filtered = await api.performSearch('target', 'custom', '.js,.log', () => {}, options);
+    assert.equal(filtered.success, true);
+    assert.deepEqual(Array.from(filtered.results, result => result.filename), ['keep.js']);
+    const logsOnly = await api.performSearch('target', 'custom', '.log', () => {}, options);
+    assert.equal(logsOnly.stats.totalFiles, 0);
+    assert.equal((await api.performSearch('target', 'all', '', () => {}, { excludedExtensions: ['log'] })).success, false);
+});
+
 test('handles empty directories, empty queries and missing roots without invalid progress', async t => {
     const { api, root } = await createHarness(t);
     const empty = await api.performSearch('anything', 'all', '');

@@ -1,8 +1,10 @@
 const PREVIEW_LIMIT = 100;
 const byId = id => document.getElementById(id);
+let mascotWaveTimer = null;
 const state = {
     config: { searchPath: '', searchType: 'all', extensions: [] },
     extensions: new Set(),
+    excludedExtensions: new Set(),
     running: false,
     requestId: null,
     lastResult: null,
@@ -10,12 +12,31 @@ const state = {
     lastContext: null,
     visibleMatches: 0,
     resultGroups: new Map(),
+    resultCounts: new Map(),
     extensionsExpanded: false,
     exporting: false,
     startedAt: 0,
     timer: null,
     cancelling: false
 };
+
+function setMascotState(status, message) {
+    byId('mascot').dataset.mascotState = status;
+    byId('mascotMessage').textContent = message;
+}
+
+function setMascotReady() {
+    if (!state.config.searchPath) setMascotState('needs-directory', '先选择搜索目录吧');
+    else if (byId('searchInput').value.trim()) setMascotState('typing', '准备好了，开始搜索吧');
+    else setMascotState('idle', '想找什么？交给我吧');
+}
+
+function setMascotResult(result) {
+    if (result.exportError) setMascotState('error', '搜索完成，结果保存失败');
+    else if (result.stats.skippedEntries) setMascotState('error', '有些文件没能读取');
+    else if (result.results.length) setMascotState('success', '找到了，来看看吧');
+    else setMascotState('empty', '没找到，换个词试试');
+}
 
 function parseExtensions(value) {
     return [...new Set(String(value || '').split(/[,，\s]+/).filter(Boolean).map(ext => (ext.startsWith('.') ? ext : '.' + ext).toLowerCase()))];
@@ -25,12 +46,23 @@ function getSelectedExtensions() {
     return [...new Set([...state.extensions, ...parseExtensions(byId('customExtInput').value)])];
 }
 
+function getExcludedFiles() {
+    return [...new Set(byId('excludedFilesInput').value.split(/\r?\n/).filter(name => name.trim()))];
+}
+
+function setSearchSettings(expanded) {
+    byId('searchSettings').hidden = !expanded;
+    byId('settingsBtn').setAttribute('aria-expanded', String(expanded));
+    document.querySelector('.workspace').classList.toggle('is-configuring', expanded);
+}
+
 function showFormError(message, field) {
     const error = byId('formError');
     error.textContent = message;
     error.hidden = !message;
     ['searchInput', 'customExtInput', 'updatePathBtn'].forEach(id => byId(id).removeAttribute('aria-invalid'));
     if (field && message) {
+        if (field === 'customExtInput' || field === 'updatePathBtn') setSearchSettings(true);
         if (field === 'customExtInput') setExtensionPanel(true);
         byId(field).setAttribute('aria-invalid', 'true');
         byId(field).focus();
@@ -73,12 +105,19 @@ function updatePath() {
     byId('updatePathBtn').title = path || '选择搜索目录，包含所有子目录';
     byId('pathAction').textContent = path ? '更换目录' : '选择目录';
     byId('copyDirectoryBtn').hidden = !path;
+    const directoryName = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
+    byId('directoryShortcutLabel').textContent = path ? `目录：${directoryName}` : '选择搜索目录';
+    byId('directoryShortcut').title = path || '选择搜索目录';
+    byId('directoryShortcut').setAttribute('aria-label', path ? `搜索目录：${path}，点击更换目录` : '选择搜索目录');
+    byId('directoryShortcut').dataset.configured = String(Boolean(path));
 }
 
 function savePreferences() {
     if (!window.customApis) return;
     state.config.searchType = document.querySelector('input[name="searchType"]:checked').value;
     state.config.extensions = [...state.extensions];
+    state.config.excludedFiles = getExcludedFiles();
+    state.config.excludedExtensions = [...state.excludedExtensions];
     try {
         window.customApis.saveConfig(state.config, state.requestId);
     } catch (error) {
@@ -100,7 +139,7 @@ function updateSelectedExtensionsDisplay() {
     const container = byId('selectedExtTags');
     container.replaceChildren();
     if (!extensions.length) {
-        container.textContent = '尚未选择类型，请选择常用类型或添加后缀。';
+        container.textContent = '尚未选择类型';
     }
     extensions.forEach(ext => {
         const tag = document.createElement('span');
@@ -127,9 +166,21 @@ function updateSelectedExtensionsDisplay() {
     byId('clearExtBtn').disabled = !extensions.length && !pending.length;
     byId('addExtBtn').disabled = !pending.length;
     byId('pendingExtNote').hidden = !pending.length;
-    byId('pendingExtNote').textContent = pending.length ? `${pending.length} 项输入待确认；按 Enter 添加，开始搜索时也会自动确认。` : '';
+    byId('pendingExtNote').textContent = pending.length ? `${pending.length} 项待添加，搜索时自动确认。` : '';
     const custom = document.querySelector('input[name="searchType"]:checked').value === 'custom';
-    byId('filterHint').textContent = custom ? `已确认 ${extensions.length} 种类型${extensions.length ? ' · ' + extensions.slice(0, 3).join('、') + (extensions.length > 3 ? ' 等' : '') : ''}` : '自动排除图片、视频等二进制文件';
+    const excludedFiles = getExcludedFiles();
+    document.querySelectorAll('.exclusion-button').forEach(button => {
+        if (button.dataset.exclude) button.setAttribute('aria-pressed', String(excludedFiles.includes(button.dataset.exclude)));
+    });
+    byId('excludeLogBtn').setAttribute('aria-pressed', String(state.excludedExtensions.has('.log')));
+    const excludedCount = excludedFiles.length + state.excludedExtensions.size;
+    const scopeLabel = (custom ? `文件类型：${extensions.length} 种` : '文件类型：全部') + (excludedCount ? ` · 排除 ${excludedCount}` : '');
+    const settingsLabel = `${scopeLabel}，点击调整`;
+    byId('settingsBtn').dataset.scope = custom ? 'custom' : 'all';
+    byId('scopeShortcutLabel').textContent = scopeLabel;
+    byId('settingsBtn').setAttribute('aria-label', settingsLabel);
+    byId('settingsBtn').title = settingsLabel;
+    byId('filterHint').textContent = custom ? `已选 ${extensions.length} 种类型${extensions.length ? ' · ' + extensions.slice(0, 3).join('、') + (extensions.length > 3 ? ' 等' : '') : ''}` : '排除常见二进制文件';
 }
 
 function commitExtensions() {
@@ -149,10 +200,17 @@ function commitExtensions() {
 function setExtensionPanel(expanded) {
     const custom = document.querySelector('input[name="searchType"]:checked').value === 'custom';
     state.extensionsExpanded = custom && expanded;
+    if (state.extensionsExpanded) setExclusionPanel(false);
     byId('customExtPanel').hidden = !state.extensionsExpanded;
     byId('toggleExtBtn').hidden = !custom;
     byId('toggleExtBtn').setAttribute('aria-expanded', String(state.extensionsExpanded));
     byId('toggleExtBtn').textContent = state.extensionsExpanded ? '收起类型' : '调整类型';
+}
+
+function setExclusionPanel(expanded) {
+    if (expanded) setExtensionPanel(false);
+    byId('exclusionPanel').hidden = !expanded;
+    byId('excludeTab').setAttribute('aria-expanded', String(expanded));
 }
 
 function updateSearchMode(expand = false) {
@@ -162,10 +220,13 @@ function updateSearchMode(expand = false) {
 }
 
 async function selectDirectory() {
-    if (!window.customApis || state.running) return;
+    if (!window.customApis || state.running || byId('directoryShortcut').disabled) return;
     showFormError('');
     const button = byId('updatePathBtn');
+    const origin = document.activeElement;
+    let selected = false;
     button.disabled = true;
+    byId('directoryShortcut').disabled = true;
     try {
         const path = await window.customApis.selectDirectory();
         if (!path) return;
@@ -174,12 +235,19 @@ async function selectDirectory() {
         state.config = config;
         updatePath();
         byId('searchFeedback').hidden = true;
+        selected = true;
+        setMascotReady();
         byId('searchInput').focus();
     } catch (error) {
         showFormError(error.message || '目录选择失败，请重试。');
+        setMascotState('error', '目录选择失败，再试一次吧');
         console.error('file_search.ui_directory_failed', { requestId: state.requestId }, error);
     } finally {
         button.disabled = false;
+        byId('directoryShortcut').disabled = false;
+        if (!selected && [button, byId('directoryShortcut'), byId('changeDirectoryBtn')].includes(origin) && (document.activeElement === document.body || document.activeElement === origin)) {
+            origin.focus({ preventScroll: true });
+        }
     }
 }
 
@@ -214,7 +282,6 @@ function showEmptyState(title, description) {
     byId('emptyState').hidden = false;
     byId('emptyTitle').textContent = title;
     byId('emptyDescription').textContent = description;
-    byId('emptySteps').hidden = true;
 }
 
 function showSearchFeedback(message, kind) {
@@ -285,6 +352,8 @@ function appendHighlightedText(container, content, query, expanded = false) {
 
 function createFileGroup(match, result) {
     const file = match.relativePath || match.filename;
+    const filename = match.filename || file.split(/[\\/]/).pop();
+    const directory = (file.endsWith(filename) ? file.slice(0, -filename.length).replace(/[\\/]$/, '') : '') || '根目录';
     const element = document.createElement('div');
     element.className = 'result-group';
     const heading = document.createElement('div');
@@ -306,11 +375,17 @@ function createFileGroup(match, result) {
     error.setAttribute('role', 'alert');
     error.hidden = true;
     const options = { requestId: result.requestId, result, errorElement: error };
-    const name = createButton('', 'result-file-path file-open-button');
-    setPathText(name, file);
+    const info = document.createElement('div');
+    info.className = 'result-file-info';
+    const name = createButton(filename, 'result-file-path file-open-button');
     name.title = match.filePath;
     name.setAttribute('aria-label', `打开原文件 ${file}`);
     name.addEventListener('click', () => runAction(name, () => window.customApis.openSourceFile(match.filePath, result.requestId), { ...options, name: 'source_open' }));
+    const directoryLabel = document.createElement('span');
+    directoryLabel.className = 'result-file-directory';
+    directoryLabel.textContent = directory;
+    directoryLabel.title = file;
+    info.append(name, directoryLabel);
     const count = document.createElement('span');
     count.className = 'result-file-count';
     const actions = document.createElement('div');
@@ -322,7 +397,7 @@ function createFileGroup(match, result) {
     copy.setAttribute('aria-label', `复制 ${file} 的完整路径`);
     copy.addEventListener('click', () => runAction(copy, () => window.customApis.copyText(match.filePath, result.requestId), { ...options, name: 'path_copy', copied: true }));
     actions.append(reveal, copy);
-    heading.append(toggle, name, count, actions);
+    heading.append(toggle, info, count, actions);
     element.append(heading, error, body);
     return { element, body, toggle, name, count, error, shown: 0 };
 }
@@ -382,11 +457,12 @@ function appendResultPage() {
         const group = state.resultGroups.get(file);
         group.body.append(createResultLine(match, index, result, group.error));
         group.shown++;
-        group.count.textContent = `${group.shown.toLocaleString()} 行已显示`;
+        const total = state.resultCounts.get(file);
+        group.count.textContent = group.shown === total ? `${total.toLocaleString()} 行` : `已显示 ${group.shown.toLocaleString()} / ${total.toLocaleString()} 行`;
     }
     state.visibleMatches = end;
     byId('previewNote').hidden = !result.results.length;
-    byId('previewNote').textContent = `已显示 ${end.toLocaleString()} / ${result.results.length.toLocaleString()} 行匹配；长行可展开或复制完整内容。`;
+    byId('previewNote').textContent = `已显示 ${end.toLocaleString()} / ${result.results.length.toLocaleString()} 行`;
     byId('loadMoreBtn').hidden = end >= result.results.length;
     byId('loadMoreBtn').textContent = `再显示 ${Math.min(PREVIEW_LIMIT, result.results.length - end)} 行`;
     console.info('file_search.ui_preview_appended', { requestId: result.requestId, start, shown: end - start, visible: end, durationMs: Date.now() - startedAt });
@@ -417,7 +493,11 @@ function renderResults(result, query) {
     byId('resultQuery').textContent = query;
     byId('resultQuery').title = query;
     setPathText(byId('resultPath'), state.lastContext.searchPath);
-    byId('resultScope').textContent = state.lastContext.searchType === 'custom' ? `类型：${state.lastContext.extensions.join('、')}` : '全部文本文件';
+    const exclusions = [];
+    if (state.lastContext.excludedFiles.length) exclusions.push(`${state.lastContext.excludedFiles.length} 个文件名`);
+    if (state.lastContext.excludedExtensions.length) exclusions.push(`后缀 ${state.lastContext.excludedExtensions.join('、')}`);
+    byId('resultScope').textContent = (state.lastContext.searchType === 'custom' ? `类型：${state.lastContext.extensions.join('、')}` : '全部文本文件') + (exclusions.length ? ` · 排除 ${exclusions.join('、')}` : '');
+    byId('resultScope').title = state.lastContext.excludedFiles.length ? `排除文件：${state.lastContext.excludedFiles.join('、')}` : '';
     byId('focusResultsBtn').hidden = !results.length;
     byId('previousResultsNote').hidden = true;
     byId('emptyState').hidden = results.length > 0;
@@ -433,6 +513,11 @@ function renderResults(result, query) {
     }
     state.visibleMatches = 0;
     state.resultGroups.clear();
+    state.resultCounts.clear();
+    results.forEach(match => {
+        const file = match.filePath || match.relativePath || match.filename;
+        state.resultCounts.set(file, (state.resultCounts.get(file) || 0) + 1);
+    });
     byId('resultList').replaceChildren();
     appendResultPage();
     updateExportState(result);
@@ -443,26 +528,43 @@ async function startSearch(event) {
     event.preventDefault();
     if (state.running || !window.customApis) return;
     showFormError('');
+    if (!state.config.searchPath) {
+        setMascotState('needs-directory', '先选择搜索目录吧');
+        return showFormError('请先选择要搜索的目录。', 'updatePathBtn');
+    }
     const query = byId('searchInput').value.trim();
-    if (!query) return showFormError('请输入要搜索的关键词或文本内容。', 'searchInput');
-    if (!state.config.searchPath) return showFormError('请先选择要搜索的目录。', 'updatePathBtn');
+    if (!query) {
+        setMascotState('error', '先输入要找的内容吧');
+        return showFormError('请输入要搜索的关键词或文本内容。', 'searchInput');
+    }
     const searchType = document.querySelector('input[name="searchType"]:checked').value;
     if (searchType === 'custom') {
-        if (!getSelectedExtensions().length) return showFormError('请至少选择一种文件类型，或切换到全部文本文件。', 'customExtInput');
-        if (!commitExtensions()) return;
+        if (!getSelectedExtensions().length) {
+            setMascotState('error', '先选择文件类型吧');
+            return showFormError('请至少选择一种文件类型，或切换到全部文本文件。', 'customExtInput');
+        }
+        if (!commitExtensions()) {
+            setMascotState('error', '检查一下文件类型吧');
+            return;
+        }
     }
-    const context = { query, searchPath: state.config.searchPath, searchType, extensions: searchType === 'custom' ? [...state.extensions] : [] };
+    const context = { query, searchPath: state.config.searchPath, searchType, extensions: searchType === 'custom' ? [...state.extensions] : [], excludedFiles: getExcludedFiles(), excludedExtensions: [...state.excludedExtensions] };
+    savePreferences();
     state.running = true;
     state.cancelling = false;
+    setMascotState('searching', '正在认真查找…');
     state.requestId = `search-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     state.startedAt = Date.now();
+    document.querySelector('.workspace').classList.toggle('is-initial', false);
+    setSearchSettings(false);
+    byId('resultsPanel').hidden = false;
     byId('searchControls').disabled = true;
     byId('searchButtonLabel').textContent = '搜索中';
     byId('searchForm').setAttribute('aria-busy', 'true');
     byId('searchFeedback').hidden = true;
     byId('retryExportBtn').disabled = true;
     byId('previousResultsNote').hidden = !state.lastResult;
-    byId('previousResultsNote').textContent = '正在搜索新的条件，下方保留上一轮结果。';
+    byId('previousResultsNote').textContent = '正在搜索，以下为上一轮结果。';
     if (!state.lastResult) byId('emptyState').hidden = true;
     setExtensionPanel(false);
     byId('progressSection').hidden = false;
@@ -471,28 +573,32 @@ async function startSearch(event) {
     state.timer = setInterval(updateElapsedTime, 100);
     console.info('file_search.ui_submitted', { requestId: state.requestId, searchType, queryLength: query.length });
     try {
-        const result = await window.customApis.performSearch(query, searchType, context.extensions.join(','), updateProgress, { requestId: state.requestId });
+        const result = await window.customApis.performSearch(query, searchType, context.extensions.join(','), updateProgress, { requestId: state.requestId, excludedFiles: context.excludedFiles, excludedExtensions: context.excludedExtensions });
         if (result.cancelled) {
+            setMascotState('idle', '已取消，随时可以再找');
             setStatus('已取消');
             showSearchFeedback('搜索已取消，未生成本次结果文件。可以调整条件后重新搜索。', 'cancelled');
-            byId('previousResultsNote').textContent = '本次搜索已取消，下方仍为上一轮结果。';
+            byId('previousResultsNote').textContent = '搜索已取消，以下为上一轮结果。';
             if (!state.lastResult) showEmptyState('搜索已取消', '可以调整条件后重新搜索。');
         } else if (!result.success) {
+            setMascotState('error', '搜索没完成，再试一次吧');
             setStatus('搜索未完成', 'error');
             showSearchFeedback(result.message || '请检查目录权限后重试。', 'error');
-            byId('previousResultsNote').textContent = '本次搜索未完成，下方仍为上一轮结果。';
+            byId('previousResultsNote').textContent = '搜索未完成，以下为上一轮结果。';
             if (!state.lastResult) showEmptyState('搜索未完成', '可以重新选择目录或调整搜索条件。');
         } else {
             state.lastResult = result;
             state.lastQuery = query;
             state.lastContext = context;
             renderResults(result, query);
+            setMascotResult(result);
         }
         console.info('file_search.ui_finished', { requestId: state.requestId, success: result.success, cancelled: Boolean(result.cancelled), durationMs: Date.now() - state.startedAt });
     } catch (error) {
+        setMascotState('error', '搜索没完成，再试一次吧');
         setStatus('搜索未完成', 'error');
         showSearchFeedback(error.message || '搜索未完成，请重试。', 'error');
-        byId('previousResultsNote').textContent = '本次搜索未完成，下方仍为上一轮结果。';
+        byId('previousResultsNote').textContent = '搜索未完成，以下为上一轮结果。';
         if (!state.lastResult) showEmptyState('搜索未完成', '可以重新选择目录或调整搜索条件。');
         console.error('file_search.ui_failed', { requestId: state.requestId, durationMs: Date.now() - state.startedAt }, error);
     } finally {
@@ -514,6 +620,7 @@ function cancelSearch() {
     if (!state.running || state.cancelling || byId('cancelSearchBtn').disabled) return;
     if (window.customApis.cancelSearch(state.requestId)) {
         state.cancelling = true;
+        setMascotState('searching', '正在取消…');
         byId('cancelSearchBtn').disabled = true;
         byId('cancelSearchBtn').textContent = '正在取消…';
         byId('progressMessage').textContent = '正在取消搜索…';
@@ -544,12 +651,16 @@ async function retryExport() {
             result.savedPath = savedPath;
             result.exportError = null;
             updateExportState(result);
-            if (!state.running) setResultStatus(result);
+            if (!state.running) {
+                setResultStatus(result);
+                setMascotResult(result);
+            }
         }
     } catch (error) {
         if (state.lastResult === result) {
             byId('resultError').textContent = error.message || '保存失败，请检查下载目录后重试。';
             byId('resultError').hidden = false;
+            if (!state.running) setMascotState('error', '结果保存失败，再试一次吧');
         }
     } finally {
         state.exporting = false;
@@ -559,16 +670,45 @@ async function retryExport() {
 }
 
 function bindEvents() {
+    const backToTop = byId('backToTopBtn');
+    const updateBackToTop = () => { backToTop.hidden = !(window.scrollY > 320); };
+    document.addEventListener('scroll', updateBackToTop, { passive: true });
+    updateBackToTop();
+    backToTop.addEventListener('click', () => {
+        if (document.activeElement === backToTop) {
+            byId(state.running ? 'searchForm' : 'searchInput').focus({ preventScroll: true });
+        }
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+    });
+    byId('mascotTrigger').addEventListener('click', () => {
+        if (mascotWaveTimer !== null) return;
+        byId('mascot').classList.toggle('is-waving', true);
+        mascotWaveTimer = setTimeout(() => {
+            byId('mascot').classList.toggle('is-waving', false);
+            mascotWaveTimer = null;
+        }, 1200);
+    });
+    byId('mascot').addEventListener('animationend', event => {
+        if (event.animationName !== 'mascot-wave') return;
+        clearTimeout(mascotWaveTimer);
+        mascotWaveTimer = null;
+        byId('mascot').classList.toggle('is-waving', false);
+    });
     byId('searchForm').addEventListener('submit', startSearch);
+    byId('settingsBtn').addEventListener('click', () => setSearchSettings(byId('searchSettings').hidden));
+    byId('directoryShortcut').addEventListener('click', selectDirectory);
     byId('updatePathBtn').addEventListener('click', selectDirectory);
     byId('searchInput').addEventListener('input', () => {
         byId('clearSearchBtn').hidden = !byId('searchInput').value;
         showFormError('');
+        setMascotReady();
     });
     byId('clearSearchBtn').addEventListener('click', () => {
         byId('searchInput').value = '';
         byId('clearSearchBtn').hidden = true;
         showFormError('');
+        setMascotReady();
         byId('searchInput').focus();
     });
     byId('searchInput').addEventListener('keydown', event => {
@@ -578,6 +718,9 @@ function bindEvents() {
         updateSearchMode(true);
         savePreferences();
     }));
+    document.querySelector('input[name="searchType"][value="custom"]').addEventListener('click', event => {
+        if (event.target.checked) setExtensionPanel(true);
+    });
     document.querySelectorAll('.ext-button').forEach(button => button.addEventListener('click', () => {
         const extension = button.dataset.ext;
         if (state.extensions.has(extension)) {
@@ -592,6 +735,23 @@ function bindEvents() {
     byId('customExtInput').addEventListener('input', () => {
         showFormError('');
         updateSelectedExtensionsDisplay();
+    });
+    byId('excludedFilesInput').addEventListener('input', updateSelectedExtensionsDisplay);
+    byId('excludedFilesInput').addEventListener('change', savePreferences);
+    byId('excludeTab').addEventListener('click', () => setExclusionPanel(byId('exclusionPanel').hidden));
+    document.querySelectorAll('.exclusion-button').forEach(button => button.addEventListener('click', () => {
+        if (!button.dataset.exclude) return;
+        const excludedFiles = getExcludedFiles();
+        const filename = button.dataset.exclude;
+        byId('excludedFilesInput').value = (excludedFiles.includes(filename) ? excludedFiles.filter(name => name !== filename) : [...excludedFiles, filename]).join('\n');
+        updateSelectedExtensionsDisplay();
+        savePreferences();
+    }));
+    byId('excludeLogBtn').addEventListener('click', () => {
+        if (state.excludedExtensions.has('.log')) state.excludedExtensions.delete('.log');
+        else state.excludedExtensions.add('.log');
+        updateSelectedExtensionsDisplay();
+        savePreferences();
     });
     byId('customExtInput').addEventListener('keydown', event => {
         if (event.key === 'Enter') {
@@ -666,10 +826,12 @@ document.addEventListener('DOMContentLoaded', () => {
         byId('environmentNotice').hidden = false;
         byId('searchButton').disabled = true;
         byId('updatePathBtn').disabled = true;
+        byId('directoryShortcut').disabled = true;
     } else {
         try {
             state.config = window.customApis.getConfig();
             state.extensions = new Set(parseExtensions(Array.isArray(state.config.extensions) ? state.config.extensions.join(',') : ''));
+            state.excludedExtensions = new Set(Array.isArray(state.config.excludedExtensions) ? state.config.excludedExtensions.filter(ext => typeof ext === 'string').map(ext => ext.toLowerCase()) : []);
             const mode = state.config.searchType === 'custom' ? 'custom' : 'all';
             document.querySelector(`input[name="searchType"][value="${mode}"]`).checked = true;
         } catch (error) {
@@ -677,8 +839,12 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('file_search.ui_config_failed', error);
         }
     }
+    byId('excludedFilesInput').value = Array.isArray(state.config.excludedFiles) ? state.config.excludedFiles.filter(name => typeof name === 'string' && !/[\r\n]/.test(name)).join('\n') : '';
     updatePath();
     updateSearchMode();
     if (configError) showFormError('无法恢复上次的设置，请重新选择搜索目录。');
+    if (!window.customApis) setMascotState('error', '请在 uTools 中打开插件');
+    else if (configError) setMascotState('error', '设置没能恢复，请选择目录');
+    else setMascotReady();
     byId('searchInput').focus({ preventScroll: true });
 });

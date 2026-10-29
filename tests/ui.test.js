@@ -168,6 +168,231 @@ function makeResult(count = 1, options = {}) {
     };
 }
 
+test('mascot action is a button and can wave again after the animation', async () => {
+    const h = createHarness();
+    const trigger = h.byId('mascotTrigger');
+    const mascot = h.byId('mascot');
+    assert.equal(trigger.tagName, 'button');
+    assert.equal(trigger.getAttribute('type'), 'button');
+    assert.equal(trigger.getAttribute('aria-label'), '和吉祥物打招呼');
+    await trigger.dispatch('click');
+    assert.match(mascot.className, /\bis-waving\b/);
+    await mascot.dispatch('animationend', { animationName: 'mascot-walk' });
+    assert.match(mascot.className, /\bis-waving\b/);
+    await mascot.dispatch('animationend', { animationName: 'mascot-wave' });
+    assert.doesNotMatch(mascot.className, /\bis-waving\b/);
+    await trigger.dispatch('click');
+    assert.match(mascot.className, /\bis-waving\b/);
+});
+
+test('mascot responds to directory, input, search and result states', async () => {
+    const missing = createHarness({ getConfig: () => ({ searchPath: '', searchType: 'all', extensions: [] }) });
+    assert.equal(missing.byId('mascot').dataset.mascotState, 'needs-directory');
+    await missing.submit();
+    assert.equal(missing.byId('mascot').dataset.mascotState, 'needs-directory');
+    await missing.byId('directoryShortcut').dispatch('click');
+    assert.equal(missing.byId('mascot').dataset.mascotState, 'typing');
+
+    let resolveSearch;
+    const h = createHarness({ performSearch: () => new Promise(resolve => { resolveSearch = resolve; }) });
+    await h.byId('searchInput').dispatch('input');
+    assert.equal(h.byId('mascot').dataset.mascotState, 'typing');
+    const pending = h.submit();
+    assert.equal(h.byId('mascot').dataset.mascotState, 'searching');
+    resolveSearch(makeResult());
+    await pending;
+    assert.equal(h.byId('mascot').dataset.mascotState, 'success');
+
+    for (const [result, expected] of [
+        [makeResult(0), 'empty'],
+        [makeResult(1, { exportError: '保存失败', savedPath: null }), 'error'],
+        [makeResult(1, { stats: { totalMatches: 1, processedFiles: 1, matchedFiles: 1, durationMs: 1, skippedEntries: 1, ignoredLinks: 0 } }), 'error'],
+        [{ success: false, cancelled: true }, 'idle'],
+        [{ success: false, message: '失败' }, 'error']
+    ]) {
+        const next = createHarness({ performSearch: async () => result });
+        await next.submit();
+        assert.equal(next.byId('mascot').dataset.mascotState, expected);
+    }
+});
+
+test('starts with a search box and prompts for a directory before searching', async () => {
+    let searches = 0;
+    const h = createHarness({
+        getConfig: () => ({ searchPath: '', searchType: 'all', extensions: [] }),
+        selectDirectory: () => null,
+        performSearch: async () => { searches++; return makeResult(); }
+    });
+    assert.equal(h.byId('searchSettings').hidden, true);
+    assert.equal(h.byId('settingsBtn').getAttribute('aria-expanded'), 'false');
+    assert.equal(h.byId('resultsPanel').hidden, true);
+    assert.equal(h.byId('directoryShortcutLabel').textContent, '选择搜索目录');
+    assert.equal(h.byId('directoryShortcut').dataset.configured, 'false');
+    assert.equal(h.byId('scopeShortcutLabel').textContent, '文件类型：全部');
+    assert.match(h.byId('directoryShortcut').getAttribute('aria-describedby'), /formError/);
+    assert.match(h.document.querySelector('.workspace').className, /\bis-initial\b/);
+    assert.doesNotMatch(h.document.querySelector('.workspace').className, /\bis-configuring\b/);
+    h.byId('searchInput').value = '';
+    await h.submit();
+    assert.equal(searches, 0);
+    assert.equal(h.byId('searchSettings').hidden, false);
+    assert.match(h.document.querySelector('.workspace').className, /\bis-initial\b/);
+    assert.match(h.document.querySelector('.workspace').className, /\bis-configuring\b/);
+    assert.equal(h.byId('settingsBtn').getAttribute('aria-expanded'), 'true');
+    assert.equal(h.document.activeElement, h.byId('updatePathBtn'));
+    assert.match(h.byId('formError').textContent, /目录/);
+    h.byId('searchInput').value = 'needle';
+    await h.byId('directoryShortcut').dispatch('click');
+    assert.equal(h.state().config.searchPath, '');
+    assert.equal(h.byId('searchInput').value, 'needle');
+    h.api.selectDirectory = () => '/other-workspace';
+    await h.byId('updatePathBtn').dispatch('click');
+    assert.equal(h.state().config.searchPath, '/other-workspace');
+    assert.equal(h.byId('searchInput').value, 'needle');
+    assert.equal(h.byId('directoryShortcutLabel').textContent, '目录：other-workspace');
+    assert.equal(h.byId('directoryShortcut').title, '/other-workspace');
+    assert.match(h.byId('directoryShortcut').getAttribute('aria-label'), /\/other-workspace/);
+    await h.byId('settingsBtn').dispatch('click');
+    assert.equal(h.byId('searchSettings').hidden, true);
+    assert.doesNotMatch(h.document.querySelector('.workspace').className, /\bis-configuring\b/);
+    await h.byId('settingsBtn').dispatch('click');
+    assert.equal(h.byId('searchSettings').hidden, false);
+    assert.match(h.document.querySelector('.workspace').className, /\bis-configuring\b/);
+    await h.submit();
+    assert.equal(searches, 1);
+    assert.doesNotMatch(h.document.querySelector('.workspace').className, /\bis-initial\b/);
+    assert.doesNotMatch(h.document.querySelector('.workspace').className, /\bis-configuring\b/);
+    assert.equal(h.byId('searchSettings').hidden, true);
+    assert.equal(h.byId('resultsPanel').hidden, false);
+});
+
+test('prevents duplicate directory dialogs and restores focus after cancellation', async () => {
+    let finish;
+    let calls = 0;
+    const h = createHarness({ selectDirectory: () => { calls++; return new Promise(resolve => { finish = resolve; }); } });
+    const shortcut = h.byId('directoryShortcut');
+    shortcut.focus();
+    const pending = shortcut.dispatch('click');
+    assert.equal(shortcut.disabled, true);
+    assert.equal(h.byId('updatePathBtn').disabled, true);
+    await shortcut.dispatch('click');
+    assert.equal(calls, 1);
+    h.document.activeElement = h.document.body;
+    finish(null);
+    await pending;
+    assert.equal(shortcut.disabled, false);
+    assert.equal(h.byId('updatePathBtn').disabled, false);
+    assert.equal(h.document.activeElement, shortcut);
+});
+
+test('restores and saves excluded file names and passes them with the selected file types', async () => {
+    let searchOptions;
+    let searchType;
+    let extensions;
+    const h = createHarness({
+        getConfig: () => ({ searchPath: '/workspace', searchType: 'custom', extensions: ['.js'], excludedFiles: ['one file.js'] }),
+        performSearch: async (query, type, types, progress, options) => {
+            searchType = type;
+            extensions = types;
+            searchOptions = options;
+            return makeResult();
+        }
+    });
+    assert.equal(h.byId('excludedFilesInput').value, 'one file.js');
+    assert.match(h.byId('scopeShortcutLabel').textContent, /排除 1/);
+    h.byId('excludedFilesInput').value = 'one file.js\nother.js\none file.js\n';
+    await h.byId('excludedFilesInput').dispatch('input');
+    await h.byId('excludedFilesInput').dispatch('change');
+    assert.deepEqual(h.saved.at(-1).excludedFiles, ['one file.js', 'other.js']);
+    await h.submit();
+    assert.equal(searchType, 'custom');
+    assert.equal(extensions, '.js');
+    assert.deepEqual(Array.from(searchOptions.excludedFiles), ['one file.js', 'other.js']);
+    assert.match(h.byId('resultScope').textContent, /排除 2 个文件名/);
+    h.byId('excludedFilesInput').value = '';
+    await h.byId('excludedFilesInput').dispatch('input');
+    assert.match(h.byId('resultScope').textContent, /排除 2 个文件名/);
+});
+
+test('selects and restores AI instruction file presets without changing the selected file types', async () => {
+    const h = createHarness({ getConfig: () => ({ searchPath: '/workspace', searchType: 'custom', extensions: ['.md'], excludedFiles: [] }) });
+    const buttons = h.document.querySelectorAll('.exclusion-button');
+    for (const filename of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'copilot-instructions.md', '.cursorrules', '.windsurfrules']) {
+        const button = buttons.find(item => item.dataset.exclude === filename);
+        assert.ok(button, filename);
+        assert.equal(button.getAttribute('aria-pressed'), 'false');
+    }
+    const agents = buttons.find(button => button.dataset.exclude === 'AGENTS.md');
+    await agents.dispatch('click');
+    assert.equal(agents.getAttribute('aria-pressed'), 'true');
+    assert.deepEqual(h.saved.at(-1).excludedFiles, ['AGENTS.md']);
+    assert.equal(h.saved.at(-1).searchType, 'custom');
+    const restored = createHarness({ getConfig: () => h.saved.at(-1) });
+    const restoredAgents = restored.document.querySelectorAll('.exclusion-button').find(button => button.dataset.exclude === 'AGENTS.md');
+    assert.equal(restoredAgents.getAttribute('aria-pressed'), 'true');
+    await restoredAgents.dispatch('click');
+    assert.deepEqual(restored.saved.at(-1).excludedFiles, []);
+});
+
+test('switches between file types and exclusion options without changing either filter', async () => {
+    let searchOptions;
+    const h = createHarness({
+        getConfig: () => ({ searchPath: '/workspace', searchType: 'custom', extensions: ['.js'], excludedFiles: ['yarn.lock', 'my file.js'] }),
+        performSearch: async (query, type, types, progress, options) => {
+            searchOptions = { type, types, excludedFiles: options.excludedFiles };
+            return makeResult();
+        }
+    });
+    const buttons = h.document.querySelectorAll('.exclusion-button');
+    const exclusionButton = buttons.find(button => button.dataset.exclude === 'yarn.lock');
+    const lockButton = buttons.find(button => button.dataset.exclude === 'package-lock.json');
+    assert.equal(exclusionButton.getAttribute('aria-pressed'), 'true');
+    assert.equal(lockButton.getAttribute('aria-pressed'), 'false');
+    await h.byId('excludeTab').dispatch('click');
+    assert.equal(h.byId('exclusionPanel').hidden, false);
+    assert.equal(h.byId('customExtPanel').hidden, true);
+    await exclusionButton.dispatch('click');
+    assert.equal(exclusionButton.getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(h.saved.at(-1).excludedFiles, ['my file.js']);
+    await exclusionButton.dispatch('click');
+    await lockButton.dispatch('click');
+    assert.equal(lockButton.getAttribute('aria-pressed'), 'true');
+    assert.deepEqual(h.saved.at(-1).excludedFiles, ['my file.js', 'yarn.lock', 'package-lock.json']);
+    const custom = h.document.querySelector('input[name="searchType"][value="custom"]');
+    await custom.dispatch('click');
+    assert.equal(h.byId('customExtPanel').hidden, false);
+    assert.equal(h.byId('exclusionPanel').hidden, true);
+    await h.submit();
+    assert.equal(searchOptions.type, 'custom');
+    assert.equal(searchOptions.types, '.js');
+    assert.deepEqual(Array.from(searchOptions.excludedFiles), ['my file.js', 'yarn.lock', 'package-lock.json']);
+});
+
+test('persists the log extension exclusion and preserves the searched result context', async () => {
+    let searchOptions;
+    const h = createHarness({
+        getConfig: () => ({ searchPath: '/workspace', searchType: 'custom', extensions: ['.js'], excludedFiles: ['yarn.lock'], excludedExtensions: ['.log'] }),
+        performSearch: async (query, type, types, progress, options) => {
+            searchOptions = { type, types, ...options };
+            return makeResult();
+        }
+    });
+    assert.equal(h.byId('excludeLogBtn').getAttribute('aria-pressed'), 'true');
+    assert.match(h.byId('scopeShortcutLabel').textContent, /排除 2/);
+    await h.submit();
+    assert.equal(searchOptions.type, 'custom');
+    assert.equal(searchOptions.types, '.js');
+    assert.deepEqual(Array.from(searchOptions.excludedExtensions), ['.log']);
+    assert.deepEqual(Array.from(searchOptions.excludedFiles), ['yarn.lock']);
+    assert.match(h.byId('resultScope').textContent, /后缀 \.log/);
+    await h.byId('excludeLogBtn').dispatch('click');
+    assert.deepEqual(h.saved.at(-1).excludedExtensions, []);
+    assert.equal(h.byId('excludeLogBtn').getAttribute('aria-pressed'), 'false');
+    assert.match(h.byId('resultScope').textContent, /后缀 \.log/);
+    await h.byId('excludeLogBtn').dispatch('click');
+    assert.deepEqual(h.saved.at(-1).excludedExtensions, ['.log']);
+});
+
 test('keeps completed results and their context through cancellation and failure, replacing them only on success', async () => {
     const h = createHarness();
     await h.submit();
@@ -208,6 +433,8 @@ test('confirms custom extensions explicitly, supports IME input and expands inva
     const custom = h.document.querySelector('input[name="searchType"][value="custom"]');
     custom.checked = true;
     await custom.dispatch('change');
+    assert.equal(h.byId('settingsBtn').dataset.scope, 'custom');
+    assert.match(h.byId('settingsBtn').getAttribute('aria-label'), /文件类型：0 种/);
     h.byId('customExtInput').value = 'vue，.go';
     await h.byId('customExtInput').dispatch('input');
     assert.equal(h.state().extensions.size, 0);
@@ -217,11 +444,13 @@ test('confirms custom extensions explicitly, supports IME input and expands inva
     assert.equal(h.state().extensions.size, 0);
     await h.byId('customExtInput').dispatch('keydown', { key: 'Enter', isComposing: false });
     assert.deepEqual([...h.state().extensions], ['.vue', '.go']);
+    assert.equal(h.byId('scopeShortcutLabel').textContent, '文件类型：2 种');
     assert.equal(h.byId('pendingExtNote').hidden, true);
     assert.deepEqual(h.saved.at(-1).extensions, ['.vue', '.go']);
     h.byId('customExtInput').value = '.png';
     await h.byId('toggleExtBtn').dispatch('click');
     await h.submit();
+    assert.equal(h.byId('searchSettings').hidden, false);
     assert.equal(h.byId('customExtPanel').hidden, false);
     assert.equal(h.document.activeElement, h.byId('customExtInput'));
     assert.match(h.byId('formError').textContent, /不支持搜索/);
@@ -236,6 +465,9 @@ test('appends pages without rebuilding rows and supports folding, expanding, cop
     const row = h.byId('match-row-0');
     const group = h.state().resultGroups.values().next().value;
     assert.equal(h.byId('resultList').querySelectorAll('.result-line').length, 100);
+    assert.equal(group.name.textContent, 'demo.js');
+    assert.equal(group.element.querySelector('.result-file-directory').textContent, 'app');
+    assert.equal(group.count.textContent, '已显示 100 / 205 行');
     assert.equal(row.querySelector('script'), null);
     assert.ok(h.byId('match-content-0').textContent.length < fullLine.length);
     await row.querySelectorAll('button')[0].dispatch('click');
@@ -257,8 +489,21 @@ test('appends pages without rebuilding rows and supports folding, expanding, cop
     await h.byId('loadMoreBtn').dispatch('click');
     assert.equal(h.byId('resultList').querySelectorAll('.result-line').length, 205);
     assert.equal(h.byId('loadMoreBtn').hidden, true);
+    assert.equal(group.count.textContent, '205 行');
     assert.match(h.byId('previewNote').textContent, /205 \/ 205/);
     assert.equal(h.byId('match-content-0').textContent, fullLine);
+});
+
+test('preserves backslashes in Unix filenames while showing the relative directory', async () => {
+    const result = makeResult();
+    result.results[0].filename = 'part\\name.js';
+    result.results[0].relativePath = 'app/part\\name.js';
+    result.results[0].filePath = '/workspace/app/part\\name.js';
+    const h = createHarness({ performSearch: async () => result });
+    await h.submit();
+    const group = h.state().resultGroups.values().next().value;
+    assert.equal(group.name.textContent, 'part\\name.js');
+    assert.equal(group.element.querySelector('.result-file-directory').textContent, 'app');
 });
 
 test('offers recovery from empty results and preserves keyboard focus when a user browses old results during a search', async () => {

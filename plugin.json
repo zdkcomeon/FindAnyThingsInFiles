@@ -5,13 +5,13 @@
   "author": "dongkun",
   "main": "index.html",
   "preload": "preload.js",
-  "logo": "logo-v2.png",
+  "logo": "logo-mascot.png",
   "platform": ["win32", "darwin", "linux"],
   "features": [
     {
       "code": "findInFiles",
-      "explain": "搜索指定后缀文件并输出Markdown格式结果",
-      "cmds": ["搜索Java文件","搜索文件","find","文件内容匹配"],
+      "explain": "搜索本地文件内容，支持类型筛选和结果导出",
+      "cmds": ["find", "find in files", "文件内容搜索", "搜索文件内容", "搜索文件", "搜索Java文件", "文件内容匹配"],
       "type": "over"
     }
   ]

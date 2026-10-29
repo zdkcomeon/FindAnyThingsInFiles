@@ -7,12 +7,12 @@ const { createInterface } = require('node:readline');
 const { randomBytes } = require('node:crypto');
 
 const CONFIG_KEY = 'find_and_config';
-const DEFAULT_CONFIG = { searchPath: '', searchType: 'all', extensions: [] };
+const DEFAULT_CONFIG = { searchPath: '', searchType: 'all', extensions: [], excludedFiles: [], excludedExtensions: [] };
 const binaryExts = [
   '.class', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico', '.heic',
   '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm',
   '.mp3', '.wav', '.aac', '.ogg', '.flac',
-  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz',
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.whl',
   '.exe', '.dll', '.so', '.bin', '.dat', '.apk', '.iso',
   '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
   '.woff', '.woff2', '.ttf', '.otf', '.db', '.sqlite'
@@ -92,7 +92,7 @@ function assertNotCancelled(task) {
   }
 }
 
-async function collectFiles(root, extensions, task, stats, report) {
+async function collectFiles(root, extensions, excludedFiles, excludedExtensions, task, stats, report) {
   const directories = [root];
   const files = [];
   while (directories.length) {
@@ -118,7 +118,7 @@ async function collectFiles(root, extensions, task, stats, report) {
         directories.push(filePath);
       } else if (entry.isFile()) {
         const extension = path.extname(entry.name).toLowerCase();
-        if (!binaryExts.includes(extension) && (!extensions || extensions.includes(extension))) files.push(filePath);
+        if (!binaryExts.includes(extension) && (!extensions || extensions.includes(extension)) && !excludedFiles.has(entry.name) && !excludedExtensions.has(extension)) files.push(filePath);
       }
       if (index % 500 === 499) {
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -195,18 +195,26 @@ async function performSearch(searchText, searchType, customExts, onProgress = ()
     const config = getConfig(requestId);
     root = config.searchPath;
     const extensions = normalizeExtensions(customExts);
+    if (options.excludedFiles !== undefined && (!Array.isArray(options.excludedFiles) || options.excludedFiles.some(name => typeof name !== 'string' || !name))) {
+      throw new Error('排除文件名格式不正确。');
+    }
+    const excludedFiles = new Set(options.excludedFiles || []);
+    if (options.excludedExtensions !== undefined && (!Array.isArray(options.excludedExtensions) || options.excludedExtensions.some(ext => typeof ext !== 'string' || !/^\.[a-z0-9_+-]+$/i.test(ext)))) {
+      throw new Error('排除文件类型格式不正确。');
+    }
+    const excludedExtensions = new Set((options.excludedExtensions || []).map(ext => ext.toLowerCase()));
     if (typeof searchText !== 'string' || !searchText.trim()) throw new Error('请输入要搜索的内容。');
     if (!root) throw new Error('请先选择要搜索的目录。');
     if (!['all', 'custom'].includes(searchType)) throw new Error('请选择有效的文件范围。');
     if (searchType === 'custom' && (!extensions.length || extensions.some(ext => !/^\.[a-z0-9_+-]+$/.test(ext) || binaryExts.includes(ext)))) {
       throw new Error('请选择有效的文本文件后缀，不能使用图片、视频等二进制文件类型。');
     }
-    console.info('file_search.parameters_validated', { requestId, root, searchType, extensions: searchType === 'custom' ? extensions : [] });
+    console.info('file_search.parameters_validated', { requestId, root, searchType, extensions: searchType === 'custom' ? extensions : [], excludedFileCount: excludedFiles.size, excludedExtensionCount: excludedExtensions.size });
     task.phase = 'scanning';
     const scanStartedAt = Date.now();
     report('scanning', '正在扫描目录…', true);
     console.info('file_search.scan_started', { requestId, root });
-    const files = await collectFiles(root, searchType === 'custom' ? extensions : null, task, stats, report);
+    const files = await collectFiles(root, searchType === 'custom' ? extensions : null, excludedFiles, excludedExtensions, task, stats, report);
     assertNotCancelled(task);
     console.info('file_search.scan_completed', { requestId, root, ...stats, durationMs: Date.now() - scanStartedAt });
     task.phase = 'searching';
